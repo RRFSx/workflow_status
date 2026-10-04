@@ -1,0 +1,18 @@
+# State files (generated on HPC, not committed)
+configs/.state/
+configs/github_token
+configs/heartbeat_uuid
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

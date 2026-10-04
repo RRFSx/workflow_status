@@ -1,0 +1,36 @@
+# common.yaml — Shared default settings inherited by all experiment YAML files
+# in the same directory. Any setting here can be overridden in an experiment YAML.
+
+experiment:
+  workflow_xml: rrfs.xml
+  workflow_db: rrfs.db
+
+cycling:
+  lookback_cycles: 4
+
+alerts:
+  recipients:
+    - Guoqing.Ge@noaa.gov
+  dedup: true
+
+checks:
+  dead_jobs:
+    enabled: true
+  stall:
+    enabled: true
+    threshold_sec: 3600
+  hung_jobs:
+    enabled: false
+    action: alert
+    tasks:
+      - name: fcst
+        log_pattern: "{workdir}/fcst_{cyc}/log.atmosphere.0000.out"
+        max_idle_sec: 1200
+
+heartbeat:
+  healthchecks_uuid: ""
+
+dashboard:
+  github_repo: guoqing-noaa/workflow_status
+  github_branch: main
+  token_file: github_token
