@@ -1,4 +1,4 @@
-# HPC Workflow Monitor (`workflow_status`)
+# HPC Workflow Status
 
 A config-driven Python monitoring system for Rocoto-based HPC workflows with a GitHub Pages dashboard, email alerting, and multi-layer failure detection.
 
