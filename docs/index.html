@@ -30,13 +30,8 @@
     </script>
     <style>
         .task-header {
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            transform: rotate(180deg);
-            height: 130px;
-            text-align: left;
-            padding-top: 8px;
-            padding-bottom: 8px;
+            line-height: 1.2;
+            text-align: center;
             white-space: nowrap;
         }
         .scrollbar-custom::-webkit-scrollbar {
@@ -823,9 +818,10 @@
             // Header row
             gridHeader.innerHTML = `<th class="p-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 w-28 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky left-0 z-10 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">Cycle</th>`;
             colOrder.forEach(colKey => {
+                const wrappedHeader = colKey.split('_').map((part, idx) => idx === 0 ? part : '_' + part).join('<br>');
                 gridHeader.innerHTML += `
-                    <th class="p-1 border-r border-gray-200 dark:border-gray-700 last:border-0 align-bottom min-w-[2.25rem] bg-gray-50 dark:bg-gray-800/50 text-center">
-                        <div class="task-header text-xs font-mono text-gray-700 dark:text-gray-300 inline-block">${colKey}</div>
+                    <th class="px-1.5 py-2 border-r border-gray-200 dark:border-gray-700 last:border-0 align-bottom min-w-[2.5rem] bg-gray-50 dark:bg-gray-800/50 text-center">
+                        <div class="task-header text-[11px] font-mono text-gray-700 dark:text-gray-300 inline-block">${wrappedHeader}</div>
                     </th>`;
             });
 
