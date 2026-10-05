@@ -10,39 +10,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Check status file staleness
+      - name: Check status-<machine> branches for stale <exp>.json files
         id: check
         run: |
           stale_files=""
           now=$(date +%s)
 
-          for f in status/**/*.json; do
-            # Skip _meta.json and history files
-            [[ "$f" == *"_meta.json" ]] && continue
-            [[ "$f" == *"_history.json" ]] && continue
-            [[ ! -f "$f" ]] && continue
+          for ref in $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/status-*'); do
+            branch="${ref#origin/}"
+            machine="${branch#status-}"
 
-            updated=$(jq -r '.updated_at // empty' "$f" 2>/dev/null)
-            if [[ -z "$updated" ]]; then
-              echo "::warning::$f has no updated_at field"
-              continue
-            fi
+            for f in $(git ls-tree --name-only "$ref" | grep -E '^[^/]+\.json$' || true); do
+              content=$(git show "${ref}:${f}" 2>/dev/null || true)
+              [[ -z "$content" ]] && continue
 
-            file_epoch=$(date -d "$updated" +%s 2>/dev/null || echo 0)
-            age_min=$(( (now - file_epoch) / 60 ))
+              updated=$(echo "$content" | jq -r '.updated_at // empty' 2>/dev/null)
+              if [[ -z "$updated" ]]; then
+                echo "::warning::${branch}/${f} has no updated_at field"
+                continue
+              fi
 
-            if [ $age_min -gt 30 ]; then
-              echo "::error::$f is ${age_min} minutes stale (last updated: $updated)"
-              exp=$(jq -r '.experiment // "unknown"' "$f")
-              cluster=$(jq -r '.cluster // "unknown"' "$f")
-              stale_files="${stale_files}${exp} on ${cluster} (${age_min}m stale)\n"
-            fi
+              file_epoch=$(date -d "$updated" +%s 2>/dev/null || echo 0)
+              age_min=$(( (now - file_epoch) / 60 ))
+
+              if [ $age_min -gt 30 ]; then
+                echo "::error::${branch}/${f} is ${age_min} minutes stale (last updated: $updated)"
+                exp=$(echo "$content" | jq -r '.experiment // "'"${f%.json}"'"')
+                cluster=$(echo "$content" | jq -r '.cluster // "'"${machine}"'"')
+                stale_files="${stale_files}${exp} on ${cluster} [${branch}/${f}] (${age_min}m stale)\n"
+              fi
+            done
           done
 
           if [[ -n "$stale_files" ]]; then
             echo "STALE=true" >> $GITHUB_OUTPUT
-            # Store the stale info for the notification step
             {
               echo "STALE_INFO<<EOF"
               echo -e "$stale_files"
@@ -59,7 +63,6 @@ jobs:
             const title = `⚠️ Stale workflow status detected - ${new Date().toISOString().slice(0,16)}`;
             const body = `## Stale Status Files Detected\n\nThe following experiments have not updated their status in over 30 minutes:\n\n\`\`\`\n${staleInfo}\`\`\`\n\nThis may indicate:\n- The monitoring script on the HPC is not running\n- The HPC system is down\n- Network connectivity issues\n\nPlease investigate.`;
 
-            // Check if there's already an open stale-status issue
             const existingIssues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,

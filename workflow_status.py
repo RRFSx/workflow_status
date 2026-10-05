@@ -3,21 +3,22 @@
 workflow_status.py — Unified HPC Rocoto Workflow Monitor
 
 Usage:
-  MACHINE=gaeac7 workflow_status.sh exp1.yaml [exp2.yaml ...] [--dry-run] [--verbose]
+  MACHINE=gaeac7 ./workflow_status.sh [config.yml] [--dry-run] [--verbose]
 
 Features:
-  - Automatically loads `common.yaml` / `common.yml` from the config file's directory
-    and deep-merges each experiment YAML on top of it
+  - Reads `config.yml` (default: `<repo_root>/config.yml`) with a `common:` section
+    and an `experiments:` list, deep-merging each experiment's overrides on top of `common:`
   - Queries `rocotostat -s` and `rocotostat -c` for both realtime & retrospective runs
   - Detects new DEAD jobs (MD5-deduplicated), workflow stalls, and hung jobs (log staleness)
   - Sends email alerts via `mail` only on state transitions
-  - Pushes combined status + 7-day rolling history to a single JSON file per experiment
-    on GitHub (`status/<cluster>/<exp>.json`) with automatic HTTP 409 retry
-  - Pings healthchecks.io dead-man's-switch heartbeat
+  - Saves `<exp>.json` (with rolling 7-day `history`) in `.state/` and pushes directly
+    to branch `status-<MACHINE>` (`https://raw.githubusercontent.com/<owner>/<repo>/status-<machine>/<exp>.json`)
+    without modifying the working tree or `main` branch
+  - Pings healthchecks.io dead-man's-switch heartbeat if `healthchecks_uuid.txt` exists
 """
 
 import argparse
-import base64
+import concurrent.futures
 import copy
 import datetime as dt
 import hashlib
@@ -29,19 +30,13 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-try:
-    import requests
-except ImportError:
-    requests = None
-import urllib.error
-import urllib.request
-
-GITHUB_API = "https://api.github.com"
+REPO_ROOT = Path(__file__).resolve().parent
 CYCLE_RE = re.compile(r"^\d{12}$")
 
 
@@ -58,27 +53,6 @@ def deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]
         else:
             result[k] = copy.deepcopy(v)
     return result
-
-
-def load_merged_config(config_file: Path, explicit_common: Optional[Path] = None) -> Dict[str, Any]:
-    """Load common.yaml/common.yml (if present) and merge config_file on top."""
-    common_cfg: Dict[str, Any] = {}
-    candidates: List[Path] = []
-    if explicit_common:
-        candidates.append(explicit_common)
-    else:
-        candidates.extend([
-            config_file.parent / "common.yaml",
-            config_file.parent / "common.yml",
-        ])
-
-    for cand in candidates:
-        if cand.is_file() and cand.resolve() != config_file.resolve():
-            common_cfg = yaml.safe_load(cand.read_text()) or {}
-            break
-
-    exp_cfg = yaml.safe_load(config_file.read_text()) or {}
-    return deep_merge(common_cfg, exp_cfg)
 
 
 def parse_rocoto_time(ts_str: Optional[str]) -> Optional[dt.datetime]:
@@ -110,13 +84,17 @@ def run_rocoto_cmd(cmd: List[str], expdir: Path) -> str:
         text=True,
         timeout=120,
     )
+    combined = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+    for line in combined.splitlines():
+        if "Error:" in line or "error:" in line:
+            logging.warning("rocotostat error in %s: %s", expdir, line.strip())
     return proc.stdout
 
 
 def parse_rocotostat(expdir: Path, xml: str, db: str, lookback: int = 6) -> List[Dict[str, Any]]:
     """
     1. Run `rocotostat -w <xml> -d <db> -s` to get all activated cycles & timestamps.
-    2. Select all 'Active' cycles + the last `lookback` cycles (works for both realtime & retro).
+    2. Exclude 'Inactive' future cycles and select the last `lookback` cycles (works for realtime & retro).
     3. Run `rocotostat -w <xml> -d <db> -c <selected_cycles>` and parse tasks.
     """
     summary_out = run_rocoto_cmd(["rocotostat", "-w", xml, "-d", db, "-s"], expdir)
@@ -128,13 +106,15 @@ def parse_rocotostat(expdir: Path, xml: str, db: str, lookback: int = 6) -> List
         if not line or line.startswith("CYCLE") or "::" in line:
             continue
         parts = line.split()
-        if len(parts) < 6:
+        if len(parts) < 4:
             continue
         cdate = parts[0]
         if not CYCLE_RE.match(cdate) or int(cdate) >= 210000000000:
             continue
         cstate = parts[1]
-        activated = " ".join(parts[2:6])
+        if cstate.lower() == "inactive":
+            continue
+        activated = " ".join(parts[2:6]) if len(parts) >= 6 else None
         deactivated = None
         if len(parts) >= 10 and parts[6] != "-":
             deactivated = " ".join(parts[6:10])
@@ -151,9 +131,7 @@ def parse_rocotostat(expdir: Path, xml: str, db: str, lookback: int = 6) -> List
     if not cycle_order:
         return []
 
-    active_cycles = [c for c in cycle_order if summary_map[c]["cycle_state"] == "Active"]
-    recent_cycles = cycle_order[-lookback:] if lookback > 0 else cycle_order
-    selected_cycles = sorted(set(active_cycles + recent_cycles))
+    selected_cycles = cycle_order[-lookback:] if lookback > 0 else cycle_order
     if not selected_cycles:
         return []
 
@@ -212,6 +190,7 @@ def build_status_dict(experiment: str, cluster: str, cycles: List[Dict[str, Any]
         "queued": 0,
         "submitting": 0,
         "waiting": 0,
+        "expired": 0,
         "dead": 0,
         "other": 0,
     }
@@ -229,6 +208,8 @@ def build_status_dict(experiment: str, cluster: str, cycles: List[Dict[str, Any]
                 counts["submitting"] += 1
             elif st == "WAITING":
                 counts["waiting"] += 1
+            elif st == "EXPIRED":
+                counts["expired"] += 1
             elif st in ("DEAD", "FAILED"):
                 counts["dead"] += 1
             else:
@@ -453,158 +434,119 @@ def check_hung_jobs(
     return hung_found
 
 
-def github_request(
-    method: str, url: str, token: str, payload: Optional[Dict[str, Any]] = None
-) -> Tuple[int, Optional[Dict[str, Any]]]:
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "workflow_status",
-    }
-    if requests is not None:
-        resp = requests.request(method, url, headers=headers, json=payload, timeout=20)
-        try:
-            data = resp.json() if resp.text else None
-        except Exception:
-            data = None
-        return resp.status_code, data
-
-    req_data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    if req_data is not None:
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=req_data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            body = resp.read().decode("utf-8")
-            return resp.status, (json.loads(body) if body else None)
-    except urllib.error.HTTPError as exc:
-        return exc.code, None
-    except Exception:
-        return 0, None
+def write_status_json(status: Dict[str, Any], status_file: Path) -> None:
+    """Atomically write `.state/<exp>.json` to disk."""
+    status_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = status_file.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(status, indent=2) + "\n")
+    tmp.replace(status_file)
 
 
-def push_combined_status_to_github(
-    status: Dict[str, Any],
-    repo: str,
-    file_path: str,
-    token: str,
-    branch: str = "main",
-) -> bool:
+def get_status_branch(cluster: Optional[str] = None) -> str:
+    machine = cluster or os.environ.get("MACHINE") or socket.gethostname()
+    return f"status-{machine}"
+
+
+def git_push_status_branch(repo_root: Path, updated_files: List[Path], branch: str, dry_run: bool) -> bool:
     """
-    Fetch existing `status/<cluster>/<exp>.json` (if any) to get its SHA and rolling 7-day
-    `history` array, append the current snapshot to `status['history']`, and PUT the single
-    combined JSON file to GitHub with up to 3 retries on HTTP 409/5xx.
+    Build a standalone commit containing <exp>.json at the root of `branch`
+    using git plumbing (hash-object -> mktree -> commit-tree) and push it to
+    `origin <commit_sha>:refs/heads/<branch>`.
+    Never modifies the working tree, index, or current branch (`main`).
     """
-    url = f"{GITHUB_API}/repos/{repo}/contents/{file_path}"
+    if not updated_files:
+        return True
 
-    done_cycles = [
-        c for c in status.get("cycles", [])
-        if c.get("cycle_state") == "Done" and c.get("wall_time_min") is not None
+    names = [f.name for f in updated_files]
+    if dry_run:
+        logging.info("[DRY-RUN] Would push to branch '%s': %s", branch, ", ".join(names))
+        return True
+
+    existing_blobs: Dict[str, str] = {}
+    for f in updated_files:
+        ho = subprocess.run(
+            ["git", "hash-object", "-w", str(f)],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if ho.returncode != 0:
+            logging.error("git hash-object failed for %s: %s", f.name, ho.stderr.strip())
+            return False
+        existing_blobs[f.name] = ho.stdout.strip()
+
+    tree_lines = [
+        f"100644 blob {sha}\t{fname}"
+        for fname, sha in sorted(existing_blobs.items())
     ]
-    latest_wall_min = done_cycles[-1]["wall_time_min"] if done_cycles else None
-    latest_cycle = status["cycles"][-1]["cdate"] if status.get("cycles") else "unknown"
-
-    new_entry = {
-        "timestamp": status["updated_at"],
-        "cycle": latest_cycle,
-        "tasks_total": status["summary"]["total_tasks"],
-        "succeeded": status["summary"]["succeeded"],
-        "running": status["summary"]["running"],
-        "dead": status["summary"]["dead"],
-        "cycle_wall_time_min": latest_wall_min,
-    }
-
-    cutoff_dt = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)
-    cutoff_iso = cutoff_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    for attempt in range(1, 4):
-        code, get_data = github_request("GET", f"{url}?ref={branch}", token)
-        sha = None
-        existing_history: List[Dict[str, Any]] = []
-
-        if code == 200 and get_data:
-            sha = get_data.get("sha")
-            content_b64 = get_data.get("content", "")
-            if content_b64:
-                try:
-                    raw_json = base64.b64decode(content_b64).decode("utf-8")
-                    old_doc = json.loads(raw_json)
-                    existing_history = old_doc.get("history", [])
-                except Exception:
-                    existing_history = []
-
-        trimmed = [
-            e for e in existing_history
-            if isinstance(e, dict) and e.get("timestamp", "") >= cutoff_iso
-        ]
-        trimmed.append(new_entry)
-        status["history"] = trimmed[-1008:]
-
-        encoded = base64.b64encode((json.dumps(status, indent=2) + "\n").encode("utf-8")).decode("ascii")
-        put_payload: Dict[str, Any] = {
-            "message": f"status update {file_path} {status['updated_at']}",
-            "content": encoded,
-            "branch": branch,
-        }
-        if sha:
-            put_payload["sha"] = sha
-
-        put_code, _ = github_request("PUT", url, token, put_payload)
-        if put_code in (200, 201):
-            return True
-        if put_code in (409, 500, 502, 503, 504) and attempt < 3:
-            logging.warning("GitHub PUT %s returned %d (attempt %d/3), retrying...", file_path, put_code, attempt)
-            time.sleep(1.5 * attempt)
-            continue
-
-        logging.error("Failed to push %s to GitHub (HTTP %d)", file_path, put_code)
+    mktree = subprocess.run(
+        ["git", "mktree"],
+        cwd=str(repo_root),
+        input="\n".join(tree_lines) + "\n",
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if mktree.returncode != 0:
+        logging.error("git mktree failed: %s", mktree.stderr.strip())
         return False
+    tree_sha = mktree.stdout.strip()
 
+    msg = f"status update ({branch}) {utc_now_iso()}"
+    ct = subprocess.run(
+        ["git", "commit-tree", tree_sha, "-m", msg],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if ct.returncode != 0:
+        logging.error("git commit-tree failed: %s", ct.stderr.strip())
+        return False
+    commit_sha = ct.stdout.strip()
+
+    push_proc = subprocess.run(
+        ["git", "push", "--force", "origin", f"{commit_sha}:refs/heads/{branch}"],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if push_proc.returncode == 0:
+        logging.info("Pushed %s to origin/%s", ", ".join(names), branch)
+        return True
+
+    logging.error("Failed to push to origin/%s: %s", branch, push_proc.stderr.strip())
     return False
 
 
-def ping_heartbeat(uuid_str: str, dry_run: bool) -> None:
+def find_heartbeat_uuid(repo_root: Path) -> Optional[str]:
+    """Read healthchecks.io UUID from untracked root file healthchecks_uuid.txt."""
+    p = repo_root / "healthchecks_uuid.txt"
+    if p.is_file():
+        val = p.read_text().strip()
+        if val:
+            return val
+    return None
+
+
+def ping_heartbeat(uuid_str: Optional[str], dry_run: bool) -> None:
     if not uuid_str or dry_run:
         return
     url = f"https://hc-ping.com/{uuid_str.strip()}"
     try:
-        if requests is not None:
-            requests.get(url, timeout=10)
-        else:
-            urllib.request.urlopen(url, timeout=10).read()
+        urllib.request.urlopen(url, timeout=10).read()
         logging.info("Sent heartbeat ping to healthchecks.io")
     except Exception as exc:
         logging.warning("Heartbeat ping failed: %s", exc)
 
 
-def resolve_token(dash_cfg: Dict[str, Any], config_dir: Path) -> Optional[str]:
-    token_file_str = dash_cfg.get("token_file")
-    candidates: List[Path] = []
-    if token_file_str:
-        p = Path(os.path.expanduser(token_file_str))
-        candidates.append(p if p.is_absolute() else (config_dir / p))
-    candidates.append(config_dir / "github_token")
-
-    for cand in candidates:
-        if cand.is_file():
-            tok = cand.read_text().strip()
-            if tok:
-                return tok
-    return None
-
-
 def process_experiment(
-    config_file: Path,
-    explicit_common: Optional[Path],
+    exp_cfg: Dict[str, Any],
+    state_dir: Path,
     dry_run: bool,
-    heartbeats_to_ping: Set[str],
-) -> bool:
-    cfg = load_merged_config(config_file, explicit_common)
-    config_dir = config_file.parent
-    state_dir = config_dir / ".state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-
-    exp_cfg = cfg.get("experiment", {})
+) -> Optional[Path]:
     exp_name = exp_cfg.get("name")
     cluster = exp_cfg.get("cluster") or os.environ.get("MACHINE") or "unknown"
     expdir_str = exp_cfg.get("expdir")
@@ -612,43 +554,27 @@ def process_experiment(
     db = exp_cfg.get("workflow_db", "rrfs.db")
 
     if not exp_name or not expdir_str:
-        logging.error("Missing required experiment fields (name, expdir) in %s", config_file.name)
-        return False
+        logging.error("Missing required experiment fields (name, expdir): %s", exp_cfg)
+        return None
 
     expdir = Path(expdir_str)
     logging.info("Processing experiment: %s on %s (%s)", exp_name, cluster, expdir)
 
     if not expdir.is_dir():
         logging.warning("Experiment directory not accessible on %s: %s — skipping", socket.gethostname(), expdir)
-        return False
+        return None
 
-    cycling_cfg = cfg.get("cycling", {})
-    lookback = int(cycling_cfg.get("lookback_cycles", 6))
+    lookback = int(exp_cfg.get("lookback_cycles", 72))
+    recipients = parse_recipients(exp_cfg.get("recipients", []))
+    subject_prefix = exp_cfg.get("subject_prefix", exp_name)
 
-    alerts_cfg = cfg.get("alerts", {})
-    recipients = parse_recipients(alerts_cfg.get("recipients", []))
-    subject_prefix = alerts_cfg.get("subject_prefix", exp_name)
-
-    checks_cfg = cfg.get("checks", {})
+    checks_cfg = exp_cfg.get("checks", {})
     dead_cfg = checks_cfg.get("dead_jobs", {})
     stall_cfg = checks_cfg.get("stall", {})
     hung_cfg = checks_cfg.get("hung_jobs", {})
 
-    dash_cfg = cfg.get("dashboard", {})
-    github_repo = dash_cfg.get("github_repo", "guoqing-noaa/workflow_status")
-    github_branch = dash_cfg.get("github_branch", "main")
-    status_path = dash_cfg.get("status_path") or f"status/{cluster}/{exp_name}.json"
-    github_token = resolve_token(dash_cfg, config_dir)
-
-    hb_cfg = cfg.get("heartbeat", {})
-    hc_uuid = (hb_cfg.get("healthchecks_uuid") or "").strip()
-    if not hc_uuid and (config_dir / "heartbeat_uuid").is_file():
-        hc_uuid = (config_dir / "heartbeat_uuid").read_text().strip()
-    if hc_uuid:
-        heartbeats_to_ping.add(hc_uuid)
-
-    state_file = state_dir / f"{exp_name}_{cluster}.json"
-    local_status_file = state_dir / f"{exp_name}_{cluster}_status.json"
+    status_file = state_dir / f"{exp_name}.json"
+    state_file = state_dir / f"{exp_name}_{cluster}_state.json"
     state = load_state(state_file)
 
     # 1. Parse rocotostat
@@ -712,37 +638,13 @@ def process_experiment(
                 lines.append("No automatic action taken. Please investigate.")
             send_email(f"{subject_prefix}: hung job(s)", "\n".join(lines), recipients, dry_run)
 
-    # 5. Save state
+    # 5. Save deduplication state
     state["last_check"] = status["updated_at"]
     save_state(state_file, state)
 
-    # 6. Push combined status + history JSON to GitHub
-    if github_token and not dry_run:
-        logging.info("Pushing status + history to GitHub: %s", status_path)
-        push_combined_status_to_github(status, github_repo, status_path, github_token, github_branch)
-    else:
-        if not github_token:
-            logging.warning("No GitHub token configured — skipping GitHub push for %s", exp_name)
-        done_cycles = [
-            c for c in status.get("cycles", [])
-            if c.get("cycle_state") == "Done" and c.get("wall_time_min") is not None
-        ]
-        status["history"] = [
-            {
-                "timestamp": status["updated_at"],
-                "cycle": status["cycles"][-1]["cdate"] if status.get("cycles") else "unknown",
-                "tasks_total": status["summary"]["total_tasks"],
-                "succeeded": status["summary"]["succeeded"],
-                "running": status["summary"]["running"],
-                "dead": status["summary"]["dead"],
-                "cycle_wall_time_min": done_cycles[-1]["wall_time_min"] if done_cycles else None,
-            }
-        ]
-        if dry_run:
-            logging.info("[DRY-RUN] Would push status + history to GitHub: %s", status_path)
-
-    local_status_file.write_text(json.dumps(status, indent=2) + "\n")
-    logging.info("Saved local status JSON: %s", local_status_file)
+    # 6. Write .state/<exp>.json
+    write_status_json(status, status_file)
+    logging.info("Saved status JSON: %s", status_file)
 
     s = status["summary"]
     logging.info(
@@ -757,45 +659,37 @@ def process_experiment(
         s["waiting"],
         s["dead"],
     )
-    return True
+    return status_file
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Unified HPC Rocoto Workflow Monitor (inherits shared settings from common.yaml)"
+        description="Unified HPC Rocoto Workflow Monitor"
     )
     parser.add_argument(
-        "configs",
-        nargs="+",
-        help="One or more experiment YAML config files (e.g., exp1.yaml exp2.yaml)",
-    )
-    parser.add_argument(
-        "--common",
-        help="Optional path to common.yaml (defaults to common.yaml/common.yml alongside each config file)",
+        "config",
+        nargs="?",
+        default=str(REPO_ROOT / "config.yml"),
+        help="Path to YAML config file (default: <repo_root>/config.yml)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run checks locally without sending emails or pushing to GitHub",
+        help="Run checks and update local status JSON files without sending emails or pushing to GitHub",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
-    config_files: List[Path] = []
-    for raw in args.configs:
-        p = Path(raw).resolve()
-        if not p.is_file():
-            print(f"ERROR: Config file not found: {raw}", file=sys.stderr)
-            return 1
-        config_files.append(p)
+    config_file = Path(args.config).resolve()
+    if not config_file.is_file():
+        print(f"ERROR: Config file not found: {config_file}", file=sys.stderr)
+        return 1
 
-    explicit_common = Path(args.common).resolve() if args.common else None
-
-    first_state_dir = config_files[0].parent / ".state"
-    first_state_dir.mkdir(parents=True, exist_ok=True)
-    log_file = first_state_dir / "monitor.log"
+    state_dir = REPO_ROOT / ".state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    log_file = state_dir / "monitor.log"
     if log_file.is_file() and log_file.stat().st_size > 1048576:
-        log_file.replace(first_state_dir / "monitor.log.prev")
+        log_file.replace(state_dir / "monitor.log.prev")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -808,27 +702,50 @@ def main() -> int:
     )
     logging.Formatter.converter = time.gmtime
 
+    status_branch = get_status_branch()
     logging.info(
-        "=== Monitor run started (MACHINE=%s, dry_run=%s) ===",
+        "=== Monitor run started (MACHINE=%s, branch=%s, dry_run=%s) ===",
         os.environ.get("MACHINE", "unset"),
+        status_branch,
         args.dry_run,
     )
 
-    ok_count = 0
-    heartbeats_to_ping: Set[str] = set()
+    raw_cfg = yaml.safe_load(config_file.read_text()) or {}
+    common_cfg = raw_cfg.get("common", {})
+    experiments = raw_cfg.get("experiments", [])
 
-    for cf in config_files:
-        try:
-            if process_experiment(cf, explicit_common, args.dry_run, heartbeats_to_ping):
-                ok_count += 1
-        except Exception as exc:
-            logging.exception("Error processing %s: %s", cf.name, exc)
+    if not experiments:
+        logging.error("No experiments defined under 'experiments:' in %s", config_file)
+        return 1
 
+    merged_list = [deep_merge(common_cfg, exp_item) for exp_item in experiments]
+    updated_files: List[Path] = []
+
+    # Process all experiments concurrently in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(merged_list)) as pool:
+        future_map = {
+            pool.submit(process_experiment, m_exp, state_dir, args.dry_run): m_exp.get("name", "unknown")
+            for m_exp in merged_list
+        }
+        for fut in concurrent.futures.as_completed(future_map):
+            name = future_map[fut]
+            try:
+                res = fut.result()
+                if res is not None:
+                    updated_files.append(res)
+            except Exception as exc:
+                logging.exception("Error processing %s: %s", name, exc)
+
+    ok_count = len(updated_files)
     if ok_count > 0:
-        for uuid_str in sorted(heartbeats_to_ping):
-            ping_heartbeat(uuid_str, args.dry_run)
+        # Run git push and healthchecks heartbeat concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as net_pool:
+            f_push = net_pool.submit(git_push_status_branch, REPO_ROOT, sorted(updated_files), status_branch, args.dry_run)
+            f_ping = net_pool.submit(ping_heartbeat, find_heartbeat_uuid(REPO_ROOT), args.dry_run)
+            f_push.result()
+            f_ping.result()
 
-    logging.info("=== Monitor run completed (%d/%d experiments succeeded) ===", ok_count, len(config_files))
+    logging.info("=== Monitor run completed (%d/%d experiments succeeded) ===", ok_count, len(experiments))
     return 0 if ok_count > 0 else 1
 
 

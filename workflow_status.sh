@@ -4,8 +4,8 @@
 # Resolves the machine's pyDAmonitor Python executable and Rocoto module,
 # then executes workflow_status.py without needing `conda activate`.
 #
-# Example usage:
-#   MACHINE=gaeac7 workflow_status.sh <exp1.yaml> [exp2.yaml ...] [--dry-run] [--verbose]
+# Usage:
+#   MACHINE=gaeac7 ./workflow_status.sh [config.yml] [--dry-run] [--verbose]
 
 set -o pipefail
 
@@ -13,16 +13,17 @@ set -o pipefail
 unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROCOTO_MOD="${ROCOTO_MOD:-rocoto/1.3.7g}"
 
 if [[ -z "${MACHINE:-}" ]]; then
   echo "ERROR: MACHINE environment variable is required." >&2
-  echo "Usage: MACHINE=<gaeac6|gaeac7|hera|ursa|orion|hercules|derecho> $(basename "$0") <exp1.yaml> [exp2.yaml ...]" >&2
+  echo "Usage: MACHINE=<gaeac6|gaeac7|hera|ursa|orion|hercules|derecho> $(basename "$0") [config.yml] [--dry-run]" >&2
   exit 1
 fi
 export MACHINE
 
 # ── Load Rocoto Module & Set Miniforge3 BASEDIR ─────────────────────────
-[[ -f /etc/profile ]] && source /etc/profile 2>/dev/null || true
+command -v module &>/dev/null || { [[ -f /etc/profile ]] && source /etc/profile 2>/dev/null || true; }
 
 BASEDIR=""
 case "${MACHINE}" in
@@ -68,7 +69,7 @@ case "${MACHINE}" in
 esac
 
 if command -v module &>/dev/null; then
-  module load rocoto 2>/dev/null || true
+  module load "${ROCOTO_MOD}" 2>/dev/null || true
 fi
 
 if [[ -n "${BASEDIR}" && -x "${BASEDIR}/envs/pyDAmonitor/bin/python3" ]]; then

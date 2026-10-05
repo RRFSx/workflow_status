@@ -1,9 +1,0 @@
-# Example hourly realtime experiment config (inherits defaults from common.yaml)
-# Usage: MACHINE=gaeac6 workflow_status.sh configs/rrfsdet_rt.yaml
-
-experiment:
-  name: rrfsdet_rt
-  expdir: /scratch5/purged/gge/arps/PEAR/exp/rrfsdet
-
-alerts:
-  subject_prefix: rrfsv2x_rt

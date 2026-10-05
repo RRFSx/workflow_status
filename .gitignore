@@ -1,7 +1,6 @@
-# State files (generated on HPC, not committed)
-configs/.state/
-configs/github_token
-configs/heartbeat_uuid
+# State files and secrets (generated on HPC, not committed)
+.state/
+healthchecks_uuid.txt
 
 # Python
 __pycache__/

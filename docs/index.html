@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HPC Workflow Monitor</title>
+    <title>HPC Workflow Status</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -13,12 +13,12 @@
                     colors: {
                         state: {
                             succeeded: '#10b981', // emerald-500
-                            running: '#3b82f6', // blue-500
-                            queued: '#6366f1', // indigo-500
-                            waiting: '#64748b', // slate-500
-                            dead: '#ef4444', // red-500
-                            submitting: '#eab308', // yellow-500
-                            other: '#f97316', // orange-500
+                            running: '#3b82f6',   // blue-500
+                            queued: '#6366f1',    // indigo-500
+                            waiting: '#64748b',   // slate-500
+                            dead: '#ef4444',      // red-500
+                            submitting: '#0ea5e9',// sky-500 (cool blue-cyan)
+                            other: '#f97316',     // orange-500
                         }
                     },
                     animation: {
@@ -33,41 +33,11 @@
             writing-mode: vertical-rl;
             text-orientation: mixed;
             transform: rotate(180deg);
-            height: 120px;
+            height: 130px;
             text-align: left;
             padding-top: 8px;
             padding-bottom: 8px;
             white-space: nowrap;
-        }
-        .tooltip {
-            position: relative;
-        }
-        .tooltip .tooltiptext {
-            visibility: hidden;
-            background-color: #333;
-            color: #fff;
-            text-align: left;
-            padding: 8px;
-            border-radius: 6px;
-            position: absolute;
-            z-index: 50;
-            bottom: 125%;
-            left: 50%;
-            transform: translateX(-50%);
-            opacity: 0;
-            transition: opacity 0.2s;
-            white-space: nowrap;
-            font-size: 0.75rem;
-            pointer-events: none;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        }
-        .dark .tooltip .tooltiptext {
-            background-color: #1f2937;
-            border: 1px solid #374151;
-        }
-        .tooltip:hover .tooltiptext {
-            visibility: visible;
-            opacity: 1;
         }
         .scrollbar-custom::-webkit-scrollbar {
             height: 8px;
@@ -87,7 +57,6 @@
         .dark .scrollbar-custom::-webkit-scrollbar-thumb {
             background: rgba(255,255,255,0.2);
         }
-        
         .toggle-checkbox:checked {
             right: 0;
             border-color: #68D391;
@@ -119,91 +88,91 @@
 </head>
 <body class="bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-200 min-h-screen flex flex-col font-sans transition-colors duration-200">
 
-    <!-- Header -->
-    <header class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+    <!-- Floating Tooltip (never clipped by table/container bounds) -->
+    <div id="floating-tooltip" class="hidden fixed z-50 pointer-events-none bg-gray-900/95 dark:bg-gray-800/95 text-white border border-gray-700 dark:border-gray-600 rounded-lg shadow-xl p-3 text-xs backdrop-blur-sm w-max max-w-[96vw]"></div>
+
+    <!-- Header (Full Width) -->
+    <header class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 w-full">
+        <div class="w-full px-6 py-3.5 flex flex-col sm:flex-row justify-between items-center gap-4">
             <div class="flex items-center gap-3">
-                <svg class="w-8 h-8 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                <h1 class="text-2xl font-bold tracking-tight">HPC Workflow Monitor</h1>
+                <svg class="w-8 h-8 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+                <h1 class="text-2xl font-bold tracking-tight">HPC Workflow Status</h1>
             </div>
-            
+
             <div class="flex items-center gap-6">
                 <div class="text-sm flex flex-col items-end">
                     <div class="flex items-center gap-2">
                         <span class="text-gray-500 dark:text-gray-400">Next refresh in:</span>
                         <span id="countdown" class="font-mono font-bold text-blue-600 dark:text-blue-400">02:00</span>
                     </div>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                         Last update: <span id="last-update-time">--</span>
                     </div>
                 </div>
-                
-                <button id="refresh-btn" class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-md transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800" title="Manual Refresh">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+
+                <button id="refresh-btn" class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-md transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500" title="Manual Refresh">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
                 </button>
 
                 <!-- Theme Toggle -->
                 <div class="flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    </svg>
                     <div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
                         <input type="checkbox" name="toggle" id="theme-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer" checked/>
                         <label for="theme-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
                     </div>
-                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                    <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                    </svg>
                 </div>
             </div>
         </div>
     </header>
 
-    <!-- Error Banner -->
-    <div id="error-banner" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mx-auto max-w-7xl mt-4 w-full shadow-sm rounded-r-md" role="alert">
+    <!-- Error / Demo Banner -->
+    <div id="error-banner" class="hidden bg-amber-100 dark:bg-amber-900/30 border-b border-amber-400 dark:border-amber-700 text-amber-800 dark:text-amber-200 px-6 py-2.5 w-full text-sm" role="alert">
         <div class="flex items-center">
-            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-            <p id="error-msg">Failed to fetch status data. Showing sample data mode.</p>
+            <svg class="w-5 h-5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+            </svg>
+            <p id="error-msg">Failed to fetch live status data. Showing sample data mode.</p>
         </div>
     </div>
 
-    <!-- Main Content -->
-    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        
-        <!-- Dashboard Grid -->
-        <div id="cards-container" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">
-            <!-- Cards will be injected here -->
-        </div>
+    <!-- Main Workspace: Left Sidebar + Full-Width Content Area -->
+    <div class="flex-grow flex flex-col md:flex-row w-full min-h-0">
 
-        <!-- Historical Trends Section -->
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-            <h2 class="text-xl font-bold mb-6 flex items-center gap-2">
-                <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path></svg>
-                Historical Trends (Last 7 Days)
-            </h2>
-            
-            <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                <!-- Chart 1: Cycle Wall Time -->
-                <div class="flex flex-col">
-                    <h3 class="text-md font-semibold text-gray-700 dark:text-gray-300 mb-2 text-center">Cycle Wall Time (Minutes)</h3>
-                    <div class="relative h-64 w-full bg-gray-50 dark:bg-gray-900 rounded border border-gray-100 dark:border-gray-800 overflow-hidden">
-                        <canvas id="wallTimeChart" class="absolute inset-0 w-full h-full"></canvas>
-                    </div>
-                    <div id="wallTimeLegend" class="mt-3 flex flex-wrap justify-center gap-3 text-xs"></div>
-                </div>
-
-                <!-- Chart 2: Dead Jobs -->
-                <div class="flex flex-col">
-                    <h3 class="text-md font-semibold text-gray-700 dark:text-gray-300 mb-2 text-center">Dead Job Count</h3>
-                    <div class="relative h-64 w-full bg-gray-50 dark:bg-gray-900 rounded border border-gray-100 dark:border-gray-800 overflow-hidden">
-                        <canvas id="deadJobsChart" class="absolute inset-0 w-full h-full"></canvas>
-                    </div>
-                    <div id="deadJobsLegend" class="mt-3 flex flex-wrap justify-center gap-3 text-xs"></div>
-                </div>
+        <!-- Left Sidebar: <machine>/<exp> List -->
+        <aside class="w-full md:w-64 lg:w-72 flex-shrink-0 bg-white dark:bg-gray-800 border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-700 p-4 flex flex-col gap-3">
+            <div class="flex items-center justify-between px-1">
+                <h2 class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Experiments</h2>
+                <span id="sidebar-count" class="text-xs font-mono px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">0</span>
             </div>
-        </div>
+            <nav id="sidebar-list" class="flex flex-col gap-2 overflow-y-auto scrollbar-custom">
+                <!-- Sidebar items injected here -->
+            </nav>
+        </aside>
 
-    </main>
+        <!-- Right Main Content Area (Full Remaining Screen Width) -->
+        <main class="flex-1 min-w-0 p-4 sm:p-6 flex flex-col gap-6 w-full">
 
-    <!-- Footer -->
-    <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-6 mt-auto">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-4">
+            <!-- Selected Experiment Detail Container -->
+            <div id="exp-detail-container" class="w-full">
+                <!-- Active experiment view injected here -->
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Footer (Full Width) -->
+    <footer class="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 py-4 mt-auto w-full">
+        <div class="w-full px-6 flex flex-col md:flex-row justify-between items-center gap-4">
             <div class="text-sm text-gray-500 dark:text-gray-400">
                 Powered by workflow_status
             </div>
@@ -216,21 +185,22 @@
         </div>
     </footer>
 
-    <!-- Templates -->
+    <!-- Template for Selected Experiment Detail -->
     <template id="card-template">
-        <div class="experiment-card bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col h-full transition-shadow hover:shadow-md">
+        <div class="experiment-card bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col w-full">
             <!-- Header -->
-            <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start bg-gray-50/50 dark:bg-gray-800/50">
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap justify-between items-center gap-4 bg-gray-50/50 dark:bg-gray-800/50">
                 <div>
-                    <h2 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <h2 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2.5">
                         <span class="exp-name">experiment_name</span>
                         <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800 exp-cluster">cluster</span>
                     </h2>
-                    <div class="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-2">
-                        Host: <span class="font-mono exp-host">host</span>
+                    <div class="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-4">
+                        <span>Host: <span class="font-mono exp-host">host</span></span>
+                        <span>Updated: <span class="font-mono exp-updated-iso">--</span></span>
                     </div>
                 </div>
-                <div class="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 staleness-container bg-white dark:bg-gray-900 px-3 py-1.5 rounded-full shadow-sm border border-gray-100 dark:border-gray-700">
+                <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 staleness-container bg-white dark:bg-gray-900 px-3.5 py-1.5 rounded-full shadow-sm border border-gray-100 dark:border-gray-700">
                     <div class="staleness-dot w-2.5 h-2.5 rounded-full"></div>
                     <span class="staleness-text font-medium"></span>
                 </div>
@@ -239,38 +209,40 @@
             <!-- Alerts -->
             <div class="exp-alerts"></div>
 
-            <div class="p-5 flex-grow flex flex-col gap-5">
+            <div class="p-6 flex flex-col gap-6 w-full">
                 <!-- Summary Stats -->
-                <div>
-                    <div class="flex justify-between items-end mb-2">
+                <div class="w-full">
+                    <div class="flex flex-wrap justify-between items-end gap-2 mb-2">
                         <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Task Summary</h3>
-                        <span class="text-xs text-gray-500 dark:text-gray-400"><span class="exp-total">0</span> Total Tasks</span>
+                        <span class="text-sm font-medium text-gray-600 dark:text-gray-300 font-mono exp-summary-range">0 Total Tasks</span>
                     </div>
                     <!-- Stacked Bar -->
                     <div class="w-full h-4 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden flex exp-bar shadow-inner">
                         <!-- Segments injected here -->
                     </div>
                     <!-- Legend -->
-                    <div class="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs exp-legend">
+                    <div class="flex flex-wrap gap-x-5 gap-y-1.5 mt-3 text-xs exp-legend">
                         <!-- Legend items injected here -->
                     </div>
                 </div>
 
-                <!-- Cycles/Tasks Grid -->
-                <div class="mt-2 border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden flex-grow flex flex-col">
-                    <button class="w-full px-4 py-2 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-sm font-medium text-gray-700 dark:text-gray-300 flex justify-between items-center transition-colors grid-toggle border-b border-gray-200 dark:border-gray-700 focus:outline-none focus:bg-gray-100 dark:focus:bg-gray-700">
-                        <span>Cycle/Task Matrix</span>
-                        <svg class="w-5 h-5 transform transition-transform grid-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                <!-- Cycles/Tasks Grid (Full Width) -->
+                <div class="border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden flex flex-col w-full">
+                    <button class="grid-toggle w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-800/80 hover:bg-gray-100 dark:hover:bg-gray-700/50 text-left text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-400 flex justify-between items-center transition-colors">
+                        <span>Cycle / Task Status Grid (Combined groups show Succeeded/Total — hover for per-task details)</span>
+                        <svg class="w-4 h-4 transform transition-transform duration-200 grid-chevron rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
                     </button>
-                    <div class="grid-content hidden overflow-x-auto scrollbar-custom bg-white dark:bg-gray-900">
-                        <table class="w-full border-collapse">
-                            <thead>
-                                <tr class="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 exp-grid-header">
-                                    <!-- Headers injected here -->
+                    <div class="grid-content overflow-auto max-h-[calc(100vh-16rem)] scrollbar-custom bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 w-full">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="sticky top-0 z-20 bg-gray-50 dark:bg-gray-800 shadow-sm">
+                                <tr class="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 exp-grid-header">
+                                    <!-- Task headers injected here -->
                                 </tr>
                             </thead>
-                            <tbody class="exp-grid-body divide-y divide-gray-100 dark:divide-gray-800">
-                                <!-- Rows injected here -->
+                            <tbody class="divide-y divide-gray-200 dark:divide-gray-800 exp-grid-body">
+                                <!-- Cycle rows injected here -->
                             </tbody>
                         </table>
                     </div>
@@ -280,208 +252,207 @@
     </template>
 
     <script>
-        // Configuration (auto-detects owner/repo when hosted on GitHub Pages, falls back to default)
-        function detectRepo() {
+        // --- Configuration ---
+        const REPO = (() => {
             const host = window.location.hostname;
             const pathParts = window.location.pathname.split('/').filter(Boolean);
             if (host.endsWith('.github.io') && pathParts.length >= 1) {
-                const owner = host.replace(/\.github\.io$/, '');
+                const owner = host.replace('.github.io', '');
                 return `${owner}/${pathParts[0]}`;
             }
             return 'guoqing-noaa/workflow_status';
-        }
-        const REPO = detectRepo();
-        const BRANCH = 'main';
-        const RAW_BASE_URL = `https://raw.githubusercontent.com/${REPO}/${BRANCH}`;
-        const REFRESH_INTERVAL_SEC = 120; // 2 minutes
+        })();
 
-        // State
-        let countdownSecs = REFRESH_INTERVAL_SEC;
-        let timerInterval;
+        // Default landing experiment ('<machine>/<exp>' or '<exp>'). Falls back to first entry if not found.
+        const DEFAULT_EXP = 'ursa/rrfsv2x_det';
+        const REFRESH_INTERVAL = 120; // seconds
+
+        // --- State ---
+        let countdown = REFRESH_INTERVAL;
+        let timerInterval = null;
         let isDemoMode = false;
-        
-        // Color mapping for states
+        let currentStatusData = {};
+        let selectedExpKey = null;
+
+        // --- Sample Fallback Data ---
+        const SAMPLE_STATUS = {
+            "ursa/rrfsv2x_det": {
+                "experiment": "rrfsv2x_det",
+                "cluster": "ursa",
+                "updated_at": new Date(Date.now() - 3 * 60000).toISOString(),
+                "monitor_host": "ufe04",
+                "cycles": [
+                    {
+                        "cdate": "202610042000",
+                        "cycle_state": "Done",
+                        "tasks": [
+                            {"name": "ioda_bufr", "state": "SUCCEEDED", "jobid": "230101", "exit_status": 0, "tries": 1, "duration": 92.0},
+                            {"name": "jedivar", "state": "SUCCEEDED", "jobid": "230102", "exit_status": 0, "tries": 1, "duration": 410.0},
+                            {"name": "fcst", "state": "SUCCEEDED", "jobid": "230103", "exit_status": 0, "tries": 1, "duration": 1820.0},
+                            {"name": "upp_g00", "state": "SUCCEEDED", "jobid": "230104", "exit_status": 0, "tries": 1, "duration": 45.0},
+                            {"name": "upp_g01", "state": "SUCCEEDED", "jobid": "230105", "exit_status": 0, "tries": 1, "duration": 48.0}
+                        ]
+                    },
+                    {
+                        "cdate": "202610042100",
+                        "cycle_state": "Active",
+                        "tasks": [
+                            {"name": "ioda_bufr", "state": "SUCCEEDED", "jobid": "230201", "exit_status": 0, "tries": 1, "duration": 88.0},
+                            {"name": "jedivar", "state": "SUCCEEDED", "jobid": "230202", "exit_status": 0, "tries": 1, "duration": 395.0},
+                            {"name": "fcst", "state": "RUNNING", "jobid": "230203", "exit_status": null, "tries": 1, "duration": 950.0},
+                            {"name": "upp_g00", "state": "SUCCEEDED", "jobid": "230204", "exit_status": 0, "tries": 1, "duration": 42.0},
+                            {"name": "upp_g01", "state": "WAITING", "jobid": null, "exit_status": null, "tries": 0, "duration": null}
+                        ]
+                    }
+                ],
+                "alerts": { "dead_jobs": [], "stall": false, "stall_since": null, "hung_jobs": [] },
+                "summary": { "total_tasks": 10, "succeeded": 8, "running": 1, "queued": 0, "submitting": 0, "waiting": 1, "dead": 0, "other": 0 }
+            }
+        };
+
+        // --- Color Mapping ---
         const STATE_COLORS = {
             'SUCCEEDED': 'bg-state-succeeded',
             'RUNNING': 'bg-state-running',
             'QUEUED': 'bg-state-queued',
             'WAITING': 'bg-state-waiting',
-            '-': 'bg-state-waiting',
+            'EXPIRED': 'bg-state-other',
             'DEAD': 'bg-state-dead',
             'SUBMITTING': 'bg-state-submitting',
-            'OTHER': 'bg-state-other',
-            'FAILED': 'bg-state-dead' // Alias
+            'OTHER': 'bg-state-other'
         };
 
-        const CHART_COLORS = [
-            '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'
-        ];
-
-        // --- Demo Data ---
-        const SAMPLE_META = {
-            "experiments": [
-                {"cluster": "gaea-c6", "name": "rrfsdet_rt"},
-                {"cluster": "hercules", "name": "global_ens"}
-            ],
-            "last_updated": new Date().toISOString()
+        const STATE_DOT_COLORS = {
+            'SUCCEEDED': 'bg-emerald-400',
+            'RUNNING': 'bg-blue-400',
+            'QUEUED': 'bg-indigo-400',
+            'WAITING': 'bg-slate-400',
+            'EXPIRED': 'bg-orange-400',
+            'DEAD': 'bg-red-500',
+            'SUBMITTING': 'bg-sky-400',
+            'OTHER': 'bg-orange-400'
         };
 
-        const SAMPLE_STATUS = {
-            "rrfsdet_rt": {
-                "experiment": "rrfsdet_rt",
-                "cluster": "gaea-c6",
-                "updated_at": new Date(Date.now() - 1000 * 60 * 5).toISOString(), // 5 mins ago
-                "monitor_host": "gaea61",
-                "cycles": [
-                    {
-                        "cdate": "202610032100",
-                        "tasks": [
-                            {"name": "ungrib_ic", "state": "SUCCEEDED", "jobid": null, "exit_status": 0, "tries": 1, "duration": 56.0},
-                            {"name": "fcst", "state": "RUNNING", "jobid": "12345678", "exit_status": "-", "tries": 1, "duration": 3600.0},
-                            {"name": "upp_g01", "state": "QUEUED", "jobid": null, "exit_status": "-", "tries": 0, "duration": null},
-                            {"name": "prep_ic", "state": "DEAD", "jobid": "12345000", "exit_status": 1, "tries": 3, "duration": 120.0}
-                        ]
-                    },
-                    {
-                        "cdate": "202610032000",
-                        "tasks": [
-                            {"name": "ungrib_ic", "state": "SUCCEEDED", "jobid": null, "exit_status": 0, "tries": 1, "duration": 55.0},
-                            {"name": "fcst", "state": "SUCCEEDED", "jobid": "12345555", "exit_status": 0, "tries": 1, "duration": 3500.0},
-                            {"name": "upp_g01", "state": "SUCCEEDED", "jobid": null, "exit_status": 0, "tries": 1, "duration": 300.0},
-                            {"name": "prep_ic", "state": "SUCCEEDED", "jobid": "12344999", "exit_status": 0, "tries": 1, "duration": 110.0}
-                        ]
-                    }
-                ],
-                "alerts": {
-                    "dead_jobs": [{"cycle": "202610032100", "task": "prep_ic", "tries": 3}],
-                    "stall": false,
-                    "stall_since": null,
-                    "hung_jobs": []
-                },
-                "summary": {
-                    "total_tasks": 30,
-                    "succeeded": 20,
-                    "running": 3,
-                    "queued": 5,
-                    "dead": 1,
-                    "other": 1
-                }
-            },
-            "global_ens": {
-                "experiment": "global_ens",
-                "cluster": "hercules",
-                "updated_at": new Date(Date.now() - 1000 * 60 * 45).toISOString(), // 45 mins ago
-                "monitor_host": "herc01",
-                "cycles": [
-                    {
-                        "cdate": "202610031200",
-                        "tasks": [
-                            {"name": "init", "state": "SUCCEEDED", "jobid": null, "exit_status": 0, "tries": 1, "duration": 10.0},
-                            {"name": "run_mem01", "state": "RUNNING", "jobid": "9991", "exit_status": "-", "tries": 1, "duration": 1800.0},
-                            {"name": "run_mem02", "state": "RUNNING", "jobid": "9992", "exit_status": "-", "tries": 1, "duration": 1805.0}
-                        ]
-                    }
-                ],
-                "alerts": {
-                    "dead_jobs": [],
-                    "stall": true,
-                    "stall_since": new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-                    "hung_jobs": ["run_mem01"]
-                },
-                "summary": {
-                    "total_tasks": 10,
-                    "succeeded": 1,
-                    "running": 2,
-                    "queued": 7,
-                    "dead": 0,
-                    "other": 0
-                }
+        // Regex for grouping tasks ending in e.g. _g00, _g01, _m001, _m002, _f01, _f02, _ens01, _p01
+        const GROUP_TASK_RE = /^(.+)_([gmf]\d+|ens\d+|p\d+)$/i;
+
+        function getTaskColumnInfo(taskName) {
+            if (/^graphics_.+$/i.test(taskName)) {
+                return {
+                    colKey: 'graphics_*',
+                    isGroup: true,
+                    prefix: 'graphics'
+                };
             }
-        };
-
-        const generateSampleHistory = () => {
-            const history = {};
-            const now = Date.now();
-            const dayMs = 24 * 60 * 60 * 1000;
-            
-            for (let exp of ["rrfsdet_rt", "global_ens"]) {
-                history[exp] = { entries: [] };
-                for (let i = 6; i >= 0; i--) {
-                    const ts = new Date(now - i * dayMs);
-                    history[exp].entries.push({
-                        timestamp: ts.toISOString(),
-                        cycle: ts.toISOString().replace(/[-T:Z.]/g, '').slice(0, 12),
-                        tasks_total: exp === "rrfsdet_rt" ? 30 : 10,
-                        succeeded: exp === "rrfsdet_rt" ? 30 : 10,
-                        dead: Math.floor(Math.random() * 2),
-                        cycle_wall_time_min: exp === "rrfsdet_rt" ? 180 + Math.random()*20 : 300 + Math.random()*50
-                    });
-                }
+            const m = taskName.match(GROUP_TASK_RE);
+            if (m) {
+                const prefix = m[1];
+                const tagLetter = m[2].replace(/\d+$/, '');
+                return {
+                    colKey: `${prefix}_${tagLetter}*`,
+                    isGroup: true,
+                    prefix: prefix
+                };
             }
-            return history;
-        };
-        const SAMPLE_HISTORY = generateSampleHistory();
+            return {
+                colKey: taskName,
+                isGroup: false,
+                prefix: taskName
+            };
+        }
+
+        // --- Floating Tooltip Helpers ---
+        const tooltipEl = document.getElementById('floating-tooltip');
+
+        function showTooltip(evt, htmlContent) {
+            tooltipEl.innerHTML = htmlContent;
+            tooltipEl.classList.remove('hidden');
+            positionTooltip(evt);
+        }
+
+        function positionTooltip(evt) {
+            if (tooltipEl.classList.contains('hidden')) return;
+            const pad = 12;
+            const rect = tooltipEl.getBoundingClientRect();
+            let x = evt.clientX + pad;
+            let y = evt.clientY + pad;
+
+            if (x + rect.width + pad > window.innerWidth) {
+                x = Math.max(pad, evt.clientX - rect.width - pad);
+            }
+            if (y + rect.height + pad > window.innerHeight) {
+                y = Math.max(pad, evt.clientY - rect.height - pad);
+            }
+            tooltipEl.style.left = `${x}px`;
+            tooltipEl.style.top = `${y}px`;
+        }
+
+        function hideTooltip() {
+            tooltipEl.classList.add('hidden');
+        }
 
         // --- Initialization ---
         document.addEventListener('DOMContentLoaded', () => {
-            // Theme initialization
+            document.getElementById('github-link').href = `https://github.com/${REPO}`;
+
+            // Theme setup
             const themeToggle = document.getElementById('theme-toggle');
-            const htmlClass = document.documentElement.classList;
-            
-            // Check local storage or system preference
-            if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                htmlClass.add('dark');
-                themeToggle.checked = true;
-            } else {
-                htmlClass.remove('dark');
+            if (localStorage.getItem('theme') === 'light') {
+                document.documentElement.classList.remove('dark');
                 themeToggle.checked = false;
+            } else {
+                document.documentElement.classList.add('dark');
+                themeToggle.checked = true;
             }
 
             themeToggle.addEventListener('change', (e) => {
                 if (e.target.checked) {
-                    htmlClass.add('dark');
-                    localStorage.theme = 'dark';
+                    document.documentElement.classList.add('dark');
+                    localStorage.setItem('theme', 'dark');
                 } else {
-                    htmlClass.remove('dark');
-                    localStorage.theme = 'light';
+                    document.documentElement.classList.remove('dark');
+                    localStorage.setItem('theme', 'light');
                 }
-                // Redraw charts to update colors
-                if(window.lastHistoryData) renderCharts(window.lastHistoryData);
+                renderSelectedExperiment();
             });
 
-            // Set GitHub link
-            document.getElementById('github-link').href = `https://github.com/${REPO}`;
-
-            // Buttons
+            // Refresh button
             document.getElementById('refresh-btn').addEventListener('click', () => {
-                fetchData();
+                const icon = document.getElementById('refresh-btn').querySelector('svg');
+                icon.classList.add('animate-spin');
+                loadData();
             });
 
-            // Start loop
-            fetchData();
+            // Check URL hash for bookmarking
+            if (window.location.hash && window.location.hash.length > 1) {
+                selectedExpKey = decodeURIComponent(window.location.hash.slice(1));
+            }
+
+            // Start timer & load data
             startTimer();
+            loadData();
         });
 
         // --- Timer Logic ---
         function startTimer() {
             if (timerInterval) clearInterval(timerInterval);
-            countdownSecs = REFRESH_INTERVAL_SEC;
-            updateTimerDisplay();
-            
+            countdown = REFRESH_INTERVAL;
+            updateCountdownDisplay();
+
             timerInterval = setInterval(() => {
-                countdownSecs--;
-                if (countdownSecs <= 0) {
-                    fetchData();
-                } else {
-                    updateTimerDisplay();
+                countdown--;
+                if (countdown <= 0) {
+                    loadData();
+                    countdown = REFRESH_INTERVAL;
                 }
+                updateCountdownDisplay();
             }, 1000);
         }
 
-        function updateTimerDisplay() {
-            const min = Math.floor(countdownSecs / 60).toString().padStart(2, '0');
-            const sec = (countdownSecs % 60).toString().padStart(2, '0');
-            document.getElementById('countdown').textContent = `${min}:${sec}`;
+        function updateCountdownDisplay() {
+            const mins = Math.floor(countdown / 60).toString().padStart(2, '0');
+            const secs = (countdown % 60).toString().padStart(2, '0');
+            document.getElementById('countdown').textContent = `${mins}:${secs}`;
         }
 
         function updateLastUpdate() {
@@ -490,448 +461,490 @@
         }
 
         // --- Data Fetching ---
-        async function fetchData() {
-            document.getElementById('refresh-btn').classList.add('animate-spin');
-            const container = document.getElementById('cards-container');
+        async function loadData() {
             const errorBanner = document.getElementById('error-banner');
-            
+
             try {
-                // Discover all status/<cluster>/<exp>.json files via GitHub Tree API (no _meta.json needed)
-                const treeUrl = `https://api.github.com/repos/${REPO}/git/trees/${BRANCH}?recursive=1`;
-                const treeResp = await fetch(treeUrl, { cache: "no-store" });
-                if (!treeResp.ok) throw new Error(`GitHub Tree API failed: ${treeResp.status}`);
-                const treeData = await treeResp.json();
+                // 1. Discover all status-<machine> branches via GitHub Branches API
+                const branchesUrl = `https://api.github.com/repos/${REPO}/branches?per_page=100`;
+                const branchesResp = await fetch(branchesUrl, { cache: "no-store" });
+                if (!branchesResp.ok) throw new Error(`GitHub Branches API failed: ${branchesResp.status}`);
+                const branches = await branchesResp.json();
 
-                const statusPaths = (treeData.tree || [])
-                    .filter(item => item.type === 'blob' && /^status\/[^/]+\/[^/]+\.json$/.test(item.path) && !item.path.endsWith('_history.json'))
-                    .map(item => item.path)
-                    .sort();
+                const statusBranches = (branches || [])
+                    .filter(b => b.name && b.name.startsWith('status-'))
+                    .map(b => ({ name: b.name, ref: (b.commit && b.commit.sha) ? b.commit.sha : b.name }))
+                    .sort((a, b) => a.name.localeCompare(b.name));
 
-                if (statusPaths.length === 0) {
-                    throw new Error('No status/<cluster>/<exp>.json files found in repository yet');
+                if (statusBranches.length === 0) {
+                    throw new Error('No status-<machine> branches found in repository yet');
                 }
+
+                // 2. Discover root <exp>.json files on each status-<machine> branch
+                const targets = [];
+                await Promise.all(statusBranches.map(async (bObj) => {
+                    const branch = bObj.name;
+                    const ref = bObj.ref;
+                    const cluster = branch.replace(/^status-/, '');
+                    const treeUrl = `https://api.github.com/repos/${REPO}/git/trees/${ref}`;
+                    const treeResp = await fetch(treeUrl, { cache: "no-store" });
+                    if (!treeResp.ok) return;
+                    const treeData = await treeResp.json();
+                    (treeData.tree || [])
+                        .filter(item => item.type === 'blob' && /^[^/]+\.json$/.test(item.path))
+                        .forEach(item => {
+                            targets.push({ branch, ref, cluster, path: item.path, name: item.path.replace(/\.json$/, '') });
+                        });
+                }));
+
+                if (targets.length === 0) {
+                    throw new Error('No <exp>.json files found on status-<machine> branches yet');
+                }
+
+                targets.sort((a, b) => `${a.cluster}/${a.name}`.localeCompare(`${b.cluster}/${b.name}`));
 
                 isDemoMode = false;
                 errorBanner.classList.add('hidden');
-                
-                const statusData = {};
-                const historyData = {};
 
-                // Fetch each experiment's single combined JSON file
-                await Promise.all(statusPaths.map(async (path) => {
-                    const parts = path.split('/');
-                    const cluster = parts[1];
-                    const name = parts[2].replace(/\.json$/, '');
-                    const key = `${cluster}:${name}`;
+                const statusData = {};
+
+                // 3. Fetch each <exp>.json (using commit SHA ref from status-<machine> to bypass 5-min CDN cache)
+                await Promise.all(targets.map(async (t) => {
+                    const key = `${t.cluster}/${t.name}`;
                     try {
-                        const statusUrl = `${RAW_BASE_URL}/${path}?t=${Date.now()}`;
+                        const statusUrl = `https://raw.githubusercontent.com/${REPO}/${t.ref}/${t.path}`;
                         const statusResp = await fetch(statusUrl, { cache: "no-store" });
 
                         if (statusResp.ok) {
-                            const doc = await statusResp.json();
-                            statusData[key] = doc;
-                            if (Array.isArray(doc.history) && doc.history.length > 0) {
-                                historyData[key] = { entries: doc.history };
-                            }
+                            statusData[key] = await statusResp.json();
                         }
                     } catch (e) {
                         console.error(`Failed to fetch data for ${key}`, e);
                     }
                 }));
 
-                renderDashboard(statusData);
-                window.lastHistoryData = historyData;
-                renderCharts(historyData);
+                // Ensure sorted keys
+                const sortedStatus = {};
+                Object.keys(statusData).sort().forEach(k => { sortedStatus[k] = statusData[k]; });
+                currentStatusData = sortedStatus;
 
             } catch (error) {
                 console.warn('Using fallback sample data due to error:', error);
                 isDemoMode = true;
                 errorBanner.classList.remove('hidden');
-                renderDashboard(SAMPLE_STATUS);
-                window.lastHistoryData = SAMPLE_HISTORY;
-                renderCharts(SAMPLE_HISTORY);
+                currentStatusData = SAMPLE_STATUS;
             } finally {
-                document.getElementById('refresh-btn').classList.remove('animate-spin');
+                const icon = document.getElementById('refresh-btn').querySelector('svg');
+                if (icon) icon.classList.remove('animate-spin');
+                chooseDefaultExperimentIfNeeded();
+                renderSidebar();
+                renderSelectedExperiment();
                 updateLastUpdate();
                 startTimer();
             }
         }
 
-        // --- Rendering ---
-        function renderDashboard(statusData) {
-            const container = document.getElementById('cards-container');
+        // --- Default / Active Selection Logic ---
+        function chooseDefaultExperimentIfNeeded() {
+            const keys = Object.keys(currentStatusData);
+            if (keys.length === 0) {
+                selectedExpKey = null;
+                return;
+            }
+            // Keep existing selection if still valid
+            if (selectedExpKey && currentStatusData[selectedExpKey]) {
+                return;
+            }
+            // 1. Check DEFAULT_EXP constant in index.html
+            if (DEFAULT_EXP) {
+                const matchKey = keys.find(k => k === DEFAULT_EXP || k.endsWith(`/${DEFAULT_EXP}`));
+                if (matchKey) {
+                    selectedExpKey = matchKey;
+                    return;
+                }
+            }
+            // 2. Fallback to the first entry
+            selectedExpKey = keys[0];
+        }
+
+        function getExperimentHealth(data) {
+            const alerts = data.alerts || {};
+            const deadCount = (alerts.dead_jobs && alerts.dead_jobs.length) || (data.summary && data.summary.dead) || 0;
+            const hasStall = Boolean(alerts.stall);
+            const hungCount = (alerts.hung_jobs && alerts.hung_jobs.length) || 0;
+
+            const updatedTime = new Date(data.updated_at);
+            const diffMin = Math.floor((new Date() - updatedTime) / 60000);
+            const isStale = isNaN(diffMin) || diffMin >= 30;
+
+            if (deadCount > 0 || hasStall || hungCount > 0) {
+                return { status: 'error', deadCount, hasStall, hungCount, diffMin };
+            }
+            if (isStale) {
+                return { status: 'stale', deadCount: 0, hasStall: false, hungCount: 0, diffMin };
+            }
+            return { status: 'healthy', deadCount: 0, hasStall: false, hungCount: 0, diffMin };
+        }
+
+        // --- Sidebar Rendering ---
+        function renderSidebar() {
+            const listEl = document.getElementById('sidebar-list');
+            const countEl = document.getElementById('sidebar-count');
+            const keys = Object.keys(currentStatusData);
+            countEl.textContent = keys.length;
+            listEl.innerHTML = '';
+
+            keys.forEach(key => {
+                const data = currentStatusData[key];
+                const isSelected = key === selectedExpKey;
+                const health = getExperimentHealth(data);
+                const sum = data.summary || {};
+
+                // Color & shading based on health status (healthy -> green shaded)
+                let colorClasses = '';
+                let dotClasses = '';
+                let badgeHtml = '';
+
+                if (health.status === 'healthy') {
+                    colorClasses = isSelected
+                        ? 'bg-emerald-100/90 dark:bg-emerald-900/50 border-emerald-500 dark:border-emerald-400 text-emerald-950 dark:text-emerald-100 ring-2 ring-emerald-500/40 shadow-sm'
+                        : 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/70 text-emerald-900 dark:text-emerald-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40';
+                    dotClasses = 'bg-emerald-500';
+                    badgeHtml = `<span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-200/80 dark:bg-emerald-800/70 text-emerald-800 dark:text-emerald-200">OK</span>`;
+                } else if (health.status === 'error') {
+                    colorClasses = isSelected
+                        ? 'bg-red-100/90 dark:bg-red-900/50 border-red-500 dark:border-red-400 text-red-950 dark:text-red-100 ring-2 ring-red-500/40 shadow-sm'
+                        : 'bg-red-50/70 dark:bg-red-950/30 border-red-200 dark:border-red-800/70 text-red-900 dark:text-red-200 hover:bg-red-100/60 dark:hover:bg-red-900/40';
+                    dotClasses = 'bg-red-500 animate-pulse-fast';
+                    const errLabel = health.deadCount > 0 ? `${health.deadCount} DEAD` : (health.hasStall ? 'STALL' : 'HUNG');
+                    badgeHtml = `<span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200">${errLabel}</span>`;
+                } else {
+                    colorClasses = isSelected
+                        ? 'bg-amber-100/90 dark:bg-amber-900/50 border-amber-500 dark:border-amber-400 text-amber-950 dark:text-amber-100 ring-2 ring-amber-500/40 shadow-sm'
+                        : 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/70 text-amber-900 dark:text-amber-200 hover:bg-amber-100/60 dark:hover:bg-amber-900/40';
+                    dotClasses = 'bg-amber-500';
+                    badgeHtml = `<span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200">STALE</span>`;
+                }
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `w-full text-left px-3.5 py-2.5 rounded-lg border transition-all flex flex-col gap-1 ${colorClasses}`;
+                const ageStr = isNaN(health.diffMin) ? '--' : `${health.diffMin}m ago`;
+
+                btn.innerHTML = `
+                    <div class="flex items-center justify-between gap-2 w-full">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotClasses}"></span>
+                            <span class="font-mono text-xs font-bold truncate" title="${key}">${key}</span>
+                        </div>
+                        ${badgeHtml}
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] opacity-80 pl-4 font-mono">
+                        <span>${ageStr}</span>
+                        <span>${sum.succeeded || 0} ok · ${sum.running || 0} run</span>
+                    </div>
+                `;
+
+                btn.addEventListener('click', () => {
+                    selectedExpKey = key;
+                    history.replaceState(null, '', `#${encodeURIComponent(key)}`);
+                    renderSidebar();
+                    renderSelectedExperiment();
+                });
+
+                listEl.appendChild(btn);
+            });
+        }
+
+        // --- Selected Experiment Rendering ---
+        function renderSelectedExperiment() {
+            hideTooltip();
+            const container = document.getElementById('exp-detail-container');
             container.innerHTML = '';
-            
-            if (Object.keys(statusData).length === 0) {
-                container.innerHTML = '<div class="col-span-full text-center py-10 text-gray-500">No experiment data found.</div>';
+
+            if (!selectedExpKey || !currentStatusData[selectedExpKey]) {
+                container.innerHTML = '<div class="text-center py-12 text-gray-500">No experiment data found.</div>';
                 return;
             }
 
+            const data = currentStatusData[selectedExpKey];
             const template = document.getElementById('card-template');
+            const clone = template.content.cloneNode(true);
 
-            for (const [expName, data] of Object.entries(statusData)) {
-                const clone = template.content.cloneNode(true);
-                const card = clone.querySelector('.experiment-card');
-                
-                // Header
-                clone.querySelector('.exp-name').textContent = data.experiment || expName;
-                clone.querySelector('.exp-cluster').textContent = data.cluster || 'Unknown';
-                clone.querySelector('.exp-host').textContent = data.monitor_host || 'Unknown';
+            // Header
+            clone.querySelector('.exp-name').textContent = data.experiment || selectedExpKey;
+            clone.querySelector('.exp-cluster').textContent = data.cluster || 'Unknown';
+            clone.querySelector('.exp-host').textContent = data.monitor_host || 'Unknown';
 
-                // Staleness
-                const updatedTime = new Date(data.updated_at);
-                const now = new Date();
-                const diffMin = Math.floor((now - updatedTime) / 1000 / 60);
-                
-                const dot = clone.querySelector('.staleness-dot');
-                const text = clone.querySelector('.staleness-text');
-                text.textContent = isNaN(diffMin) ? 'Unknown' : `${diffMin} min ago`;
+            // Staleness indicator & UTC + Local time
+            const updatedTime = new Date(data.updated_at);
+            if (!isNaN(updatedTime)) {
+                const localStr = updatedTime.toLocaleString(undefined, {
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                    hour12: false, timeZoneName: 'short'
+                });
+                clone.querySelector('.exp-updated-iso').textContent = `${data.updated_at} (${localStr})`;
+            } else {
+                clone.querySelector('.exp-updated-iso').textContent = data.updated_at || '--';
+            }
+            const diffMin = Math.floor((new Date() - updatedTime) / 60000);
+            const dot = clone.querySelector('.staleness-dot');
+            const text = clone.querySelector('.staleness-text');
+            text.textContent = isNaN(diffMin) ? 'Unknown' : `${diffMin} min ago`;
 
-                if (isNaN(diffMin)) {
-                    dot.classList.add('bg-gray-400');
-                } else if (diffMin < 15) {
-                    dot.classList.add('bg-emerald-500');
-                } else if (diffMin < 30) {
-                    dot.classList.add('bg-yellow-500');
-                } else {
-                    dot.classList.add('bg-red-500', 'animate-pulse-fast');
-                    text.classList.add('text-red-600', 'dark:text-red-400');
+            if (isNaN(diffMin)) {
+                dot.classList.add('bg-gray-400');
+            } else if (diffMin < 15) {
+                dot.classList.add('bg-emerald-500');
+            } else if (diffMin < 30) {
+                dot.classList.add('bg-yellow-500');
+            } else {
+                dot.classList.add('bg-red-500', 'animate-pulse-fast');
+                text.classList.add('text-red-600', 'dark:text-red-400');
+            }
+
+            // Alerts
+            const alertsContainer = clone.querySelector('.exp-alerts');
+            if (data.alerts) {
+                if (data.alerts.dead_jobs && data.alerts.dead_jobs.length > 0) {
+                    alertsContainer.innerHTML += `
+                        <div class="px-6 py-2.5 bg-red-50 dark:bg-red-900/20 border-b border-red-100 dark:border-red-900/30 flex items-start gap-2 text-sm text-red-800 dark:text-red-300">
+                            <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>
+                            <div><strong>Dead Jobs:</strong> ${data.alerts.dead_jobs.map(j => `${j.task} (${j.cycle})`).join(', ')}</div>
+                        </div>`;
                 }
-
-                // Alerts
-                const alertsContainer = clone.querySelector('.exp-alerts');
-                let hasAlerts = false;
-                if (data.alerts) {
-                    if (data.alerts.dead_jobs && data.alerts.dead_jobs.length > 0) {
-                        hasAlerts = true;
-                        alertsContainer.innerHTML += `
-                            <div class="px-5 py-2.5 bg-red-50 dark:bg-red-900/20 border-b border-red-100 dark:border-red-900/30 flex items-start gap-2 text-sm text-red-800 dark:text-red-300">
-                                <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>
-                                <div><strong>Dead Jobs:</strong> ${data.alerts.dead_jobs.map(j => `${j.task} (${j.cycle})`).join(', ')}</div>
-                            </div>`;
-                    }
-                    if (data.alerts.stall) {
-                        hasAlerts = true;
-                        const stallDate = data.alerts.stall_since
-                            ? new Date(isNaN(Number(data.alerts.stall_since)) ? data.alerts.stall_since : Number(data.alerts.stall_since) * 1000)
-                            : null;
-                        alertsContainer.innerHTML += `
-                            <div class="px-5 py-2.5 bg-orange-50 dark:bg-orange-900/20 border-b border-orange-100 dark:border-orange-900/30 flex items-start gap-2 text-sm text-orange-800 dark:text-orange-300">
-                                <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-                                <div><strong>Workflow Stalled</strong> ${stallDate && !isNaN(stallDate) ? `since ${stallDate.toLocaleTimeString()}` : ''}</div>
-                            </div>`;
-                    }
-                    if (data.alerts.hung_jobs && data.alerts.hung_jobs.length > 0) {
-                        hasAlerts = true;
-                        const hungStr = data.alerts.hung_jobs.map(j =>
-                            typeof j === 'string' ? j : `${j.task} (${j.cycle}, job ${j.jobid})`
-                        ).join(', ');
-                        alertsContainer.innerHTML += `
-                            <div class="px-5 py-2.5 bg-orange-50 dark:bg-orange-900/20 border-b border-orange-100 dark:border-orange-900/30 flex items-start gap-2 text-sm text-orange-800 dark:text-orange-300">
-                                <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-                                <div><strong>Hung Jobs:</strong> ${hungStr}</div>
-                            </div>`;
-                    }
+                if (data.alerts.stall) {
+                    const stallDate = data.alerts.stall_since
+                        ? new Date(isNaN(Number(data.alerts.stall_since)) ? data.alerts.stall_since : Number(data.alerts.stall_since) * 1000)
+                        : null;
+                    alertsContainer.innerHTML += `
+                        <div class="px-6 py-2.5 bg-orange-50 dark:bg-orange-900/20 border-b border-orange-100 dark:border-orange-900/30 flex items-start gap-2 text-sm text-orange-800 dark:text-orange-300">
+                            <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+                            <div><strong>Workflow Stalled</strong> ${stallDate && !isNaN(stallDate) ? `since ${stallDate.toLocaleTimeString()}` : ''}</div>
+                        </div>`;
                 }
+                if (data.alerts.hung_jobs && data.alerts.hung_jobs.length > 0) {
+                    const hungStr = data.alerts.hung_jobs.map(j =>
+                        typeof j === 'string' ? j : `${j.task} (${j.cycle}, job ${j.jobid})`
+                    ).join(', ');
+                    alertsContainer.innerHTML += `
+                        <div class="px-6 py-2.5 bg-orange-50 dark:bg-orange-900/20 border-b border-orange-100 dark:border-orange-900/30 flex items-start gap-2 text-sm text-orange-800 dark:text-orange-300">
+                            <svg class="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+                            <div><strong>Hung Jobs:</strong> ${hungStr}</div>
+                        </div>`;
+                }
+            }
 
-                // Summary
-                const sum = data.summary || { total_tasks: 0, succeeded: 0, running: 0, queued: 0, submitting: 0, waiting: 0, dead: 0, other: 0 };
-                clone.querySelector('.exp-total').textContent = sum.total_tasks;
-                
-                const bar = clone.querySelector('.exp-bar');
-                const legend = clone.querySelector('.exp-legend');
-                const states = ['succeeded', 'running', 'queued', 'submitting', 'waiting', 'dead', 'other'];
-                const labels = ['Succeeded', 'Running', 'Queued', 'Submitting', 'Waiting', 'Dead', 'Other'];
-                
-                states.forEach((state, i) => {
-                    const count = sum[state] || 0;
-                    if (count > 0 && sum.total_tasks > 0) {
-                        const pct = (count / sum.total_tasks) * 100;
-                        const stateClass = STATE_COLORS[state.toUpperCase()] || STATE_COLORS['OTHER'];
-                        
-                        // Bar segment
-                        const seg = document.createElement('div');
-                        seg.className = `h-full ${stateClass} transition-all duration-500`;
-                        if (state === 'running') seg.classList.add('animate-pulse');
-                        seg.style.width = `${pct}%`;
-                        seg.title = `${labels[i]}: ${count}`;
-                        bar.appendChild(seg);
-                        
-                        // Legend item
-                        legend.innerHTML += `
-                            <div class="flex items-center gap-1.5">
-                                <div class="w-2.5 h-2.5 rounded-sm ${stateClass}"></div>
-                                <span class="text-gray-600 dark:text-gray-400 font-medium">${count} <span class="font-normal opacity-80">${labels[i]}</span></span>
-                            </div>`;
+            // Task Summary with cycle range: "392 Total Tasks during YYYYMMDDHH - YYYYMMDDHH"
+            const rawCycles = data.cycles || [];
+            const sum = { ...(data.summary || { total_tasks: 0, succeeded: 0, running: 0, queued: 0, submitting: 0, waiting: 0, expired: 0, dead: 0, other: 0 }) };
+            if (sum.expired === undefined) {
+                let expCnt = 0;
+                rawCycles.forEach(c => (c.tasks || []).forEach(t => {
+                    if ((t.state || '').toUpperCase() === 'EXPIRED') expCnt++;
+                }));
+                sum.expired = expCnt;
+                sum.other = Math.max(0, (sum.other || 0) - expCnt);
+            }
+
+            let rangeText = `${sum.total_tasks || 0} Total Tasks`;
+            if (rawCycles.length > 0) {
+                const cList = rawCycles.map(c => (c.cdate && c.cdate.length === 12) ? c.cdate.slice(0, 10) : c.cdate).sort();
+                const firstCyc = cList[0];
+                const lastCyc = cList[cList.length - 1];
+                rangeText = firstCyc === lastCyc
+                    ? `${sum.total_tasks || 0} Total Tasks during ${firstCyc}`
+                    : `${sum.total_tasks || 0} Total Tasks during ${firstCyc} - ${lastCyc}`;
+            }
+            clone.querySelector('.exp-summary-range').textContent = rangeText;
+
+            const bar = clone.querySelector('.exp-bar');
+            const legend = clone.querySelector('.exp-legend');
+            const states = ['succeeded', 'running', 'queued', 'submitting', 'waiting', 'expired', 'dead', 'other'];
+            const labels = ['Succeeded', 'Running', 'Queued', 'Submitting', 'Waiting', 'Expired', 'Dead', 'Other'];
+
+            states.forEach((state, i) => {
+                const count = sum[state] || 0;
+                if (count > 0 && sum.total_tasks > 0) {
+                    const pct = (count / sum.total_tasks) * 100;
+                    const stateClass = STATE_COLORS[state.toUpperCase()] || STATE_COLORS['OTHER'];
+
+                    const seg = document.createElement('div');
+                    seg.className = `h-full ${stateClass} transition-all duration-500`;
+                    if (state === 'running') seg.classList.add('animate-pulse');
+                    seg.style.width = `${pct}%`;
+                    seg.title = `${labels[i]}: ${count}`;
+                    bar.appendChild(seg);
+
+                    legend.innerHTML += `
+                        <div class="flex items-center gap-1.5">
+                            <div class="w-2.5 h-2.5 rounded-sm ${stateClass}"></div>
+                            <span class="text-gray-600 dark:text-gray-400 font-medium">${count} <span class="font-normal opacity-80">${labels[i]}</span></span>
+                        </div>`;
+                }
+            });
+
+            // Build combined Task Columns (combining _g00/_g01, _m001/_m002, _f01/_f02, etc.)
+            const gridHeader = clone.querySelector('.exp-grid-header');
+            const gridBody = clone.querySelector('.exp-grid-body');
+
+            const colOrder = [];
+            const colMeta = {};
+            const cycles = [...rawCycles].reverse(); // Newest cycle first
+
+            rawCycles.forEach(c => {
+                (c.tasks || []).forEach(t => {
+                    const info = getTaskColumnInfo(t.name);
+                    if (!colMeta[info.colKey]) {
+                        colMeta[info.colKey] = info;
+                        colOrder.push(info.colKey);
                     }
                 });
+            });
 
-                // Grid setup
-                const gridHeader = clone.querySelector('.exp-grid-header');
-                const gridBody = clone.querySelector('.exp-grid-body');
-                
-                // Get all unique tasks across all cycles to form columns
-                const allTasksSet = new Set();
-                const cycles = [...(data.cycles || [])].reverse(); // Newest cycle first
-                (data.cycles || []).forEach(c => {
-                    if(c.tasks) c.tasks.forEach(t => allTasksSet.add(t.name));
+            // Header row
+            gridHeader.innerHTML = `<th class="p-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 w-28 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky left-0 z-10 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">Cycle</th>`;
+            colOrder.forEach(colKey => {
+                gridHeader.innerHTML += `
+                    <th class="p-1 border-r border-gray-200 dark:border-gray-700 last:border-0 align-bottom min-w-[2.25rem] bg-gray-50 dark:bg-gray-800/50 text-center">
+                        <div class="task-header text-xs font-mono text-gray-700 dark:text-gray-300 inline-block">${colKey}</div>
+                    </th>`;
+            });
+
+            // Cycle rows
+            cycles.forEach(c => {
+                const row = document.createElement('tr');
+                const cycleStr = (c.cdate && c.cdate.length === 12) ? c.cdate.slice(0, 10) : c.cdate;
+                const badge = c.cycle_state === 'Active'
+                    ? '<span class="ml-1.5 inline-block w-2 h-2 rounded-full bg-blue-500" title="Active Cycle"></span>'
+                    : '';
+                row.innerHTML = `<td class="p-2.5 text-xs font-mono font-semibold text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky left-0 z-10 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] whitespace-nowrap">${cycleStr}${badge}</td>`;
+
+                // Group tasks for this cycle by colKey
+                const groupedTasks = {};
+                (c.tasks || []).forEach(t => {
+                    const info = getTaskColumnInfo(t.name);
+                    if (!groupedTasks[info.colKey]) groupedTasks[info.colKey] = [];
+                    groupedTasks[info.colKey].push(t);
                 });
-                const allTasks = Array.from(allTasksSet);
 
-                // Build header
-                gridHeader.innerHTML = `<th class="p-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 w-28 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky left-0 z-10 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">Cycle</th>`;
-                allTasks.forEach(t => {
-                    gridHeader.innerHTML += `
-                        <th class="p-1 border-r border-gray-200 dark:border-gray-700 last:border-0 align-bottom w-8 min-w-[2rem] bg-gray-50 dark:bg-gray-800/50">
-                            <div class="task-header text-xs text-gray-600 dark:text-gray-400 inline-block">${t}</div>
-                        </th>`;
-                });
+                colOrder.forEach(colKey => {
+                    const tasksInCol = groupedTasks[colKey] || [];
+                    const isGroupCol = colMeta[colKey].isGroup || tasksInCol.length > 1;
+                    const td = document.createElement('td');
+                    td.className = 'p-1 border-r border-gray-100 dark:border-gray-800 last:border-0 text-center align-middle';
 
-                // Build rows
-                cycles.forEach(c => {
-                    const row = document.createElement('tr');
-                    const cycleStr = c.cdate.length === 12 ? c.cdate.slice(0, 10) : c.cdate;
-                    const badge = c.cycle_state === 'Active'
-                        ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-blue-500" title="Active Cycle"></span>'
-                        : '';
-                    row.innerHTML = `<td class="p-2 text-xs font-mono text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky left-0 z-10 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] whitespace-nowrap">${cycleStr}${badge}</td>`;
-                    
-                    const taskMap = {};
-                    if(c.tasks) c.tasks.forEach(t => taskMap[t.name] = t);
+                    if (tasksInCol.length === 0) {
+                        td.innerHTML = `<div class="w-6 h-6 mx-auto bg-transparent border border-gray-100 dark:border-gray-800 border-dashed rounded"></div>`;
+                    } else if (!isGroupCol && tasksInCol.length === 1) {
+                        // Single standalone task
+                        const t = tasksInCol[0];
+                        const st = (t.state || 'OTHER').toUpperCase();
+                        const stateClass = STATE_COLORS[st] || STATE_COLORS['OTHER'];
+                        const isPulse = st === 'RUNNING' ? 'animate-pulse' : '';
 
-                    allTasks.forEach(tName => {
-                        const t = taskMap[tName];
-                        const td = document.createElement('td');
-                        td.className = 'p-1 border-r border-gray-100 dark:border-gray-800 last:border-0 text-center';
-                        
-                        if (t) {
-                            const stateClass = STATE_COLORS[t.state.toUpperCase()] || STATE_COLORS['OTHER'];
-                            const isPulse = t.state === 'RUNNING' ? 'animate-pulse' : '';
-                            td.innerHTML = `
-                                <div class="tooltip w-6 h-6 mx-auto rounded ${stateClass} ${isPulse} flex items-center justify-center cursor-help ring-1 ring-black/5 dark:ring-white/10 shadow-sm">
-                                    ${t.state === 'DEAD' ? '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>' : ''}
-                                    <div class="tooltiptext">
-                                        <strong>${t.name}</strong> (${c.cdate})<br>
-                                        State: ${t.state}<br>
-                                        JobID: ${t.jobid || 'N/A'}<br>
-                                        Duration: ${t.duration !== null ? t.duration + 's' : 'N/A'}<br>
-                                        Tries: ${t.tries !== null ? t.tries : 'N/A'}
+                        const cellDiv = document.createElement('div');
+                        cellDiv.className = `w-6 h-6 mx-auto rounded ${stateClass} ${isPulse} flex items-center justify-center cursor-help ring-1 ring-black/5 dark:ring-white/10 shadow-sm`;
+                        if (st === 'DEAD') {
+                            cellDiv.innerHTML = '<svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>';
+                        }
+
+                        const tooltipHtml = `
+                            <div class="font-bold text-sm mb-1">${t.name} <span class="font-mono font-normal opacity-80">(${cycleStr})</span></div>
+                            <div class="space-y-0.5 font-mono text-[11px]">
+                                <div>State: <span class="font-semibold">${t.state}</span></div>
+                                <div>JobID: ${t.jobid || 'N/A'}</div>
+                                <div>Duration: ${t.duration !== null && t.duration !== undefined ? t.duration + 's' : 'N/A'}</div>
+                                <div>Tries: ${t.tries !== null && t.tries !== undefined ? t.tries : 'N/A'}</div>
+                            </div>
+                        `;
+                        cellDiv.addEventListener('mouseenter', (e) => showTooltip(e, tooltipHtml));
+                        cellDiv.addEventListener('mousemove', (e) => positionTooltip(e));
+                        cellDiv.addEventListener('mouseleave', hideTooltip);
+                        td.appendChild(cellDiv);
+                    } else {
+                        // Combined group task (e.g. m001..m030, g00..g09, f01..f27): show "K/N"
+                        const total = tasksInCol.length;
+                        const succ = tasksInCol.filter(t => (t.state || '').toUpperCase() === 'SUCCEEDED').length;
+                        const runCount = tasksInCol.filter(t => (t.state || '').toUpperCase() === 'RUNNING').length;
+                        const deadCount = tasksInCol.filter(t => (t.state || '').toUpperCase() === 'DEAD').length;
+                        const queueCount = tasksInCol.filter(t => ['QUEUED', 'SUBMITTING'].includes((t.state || '').toUpperCase())).length;
+
+                        let bgClass = STATE_COLORS['WAITING'];
+                        let pulseClass = '';
+                        if (deadCount > 0) {
+                            bgClass = STATE_COLORS['DEAD'];
+                        } else if (runCount > 0) {
+                            bgClass = STATE_COLORS['RUNNING'];
+                            pulseClass = 'animate-pulse';
+                        } else if (queueCount > 0) {
+                            bgClass = STATE_COLORS['QUEUED'];
+                        } else if (succ === total) {
+                            bgClass = STATE_COLORS['SUCCEEDED'];
+                        } else if (succ > 0) {
+                            bgClass = 'bg-teal-600';
+                        }
+
+                        const cellDiv = document.createElement('div');
+                        cellDiv.className = `px-1.5 h-6 min-w-[2.5rem] mx-auto rounded ${bgClass} ${pulseClass} text-white font-mono text-[11px] font-bold flex items-center justify-center cursor-help ring-1 ring-black/5 dark:ring-white/10 shadow-sm whitespace-nowrap`;
+                        cellDiv.textContent = `${succ}/${total}`;
+
+                        // Build multi-column tooltip showing each individual task's full name & status without cropping
+                        const numCols = total > 16 ? 3 : (total > 6 ? 2 : 1);
+                        const itemsHtml = tasksInCol.map(t => {
+                            const st = (t.state || 'OTHER').toUpperCase();
+                            const dotColor = STATE_DOT_COLORS[st] || STATE_DOT_COLORS['OTHER'];
+                            const durStr = t.duration !== null && t.duration !== undefined ? `${t.duration}s` : '-';
+                            return `
+                                <div class="flex items-center justify-between gap-3 bg-gray-800/80 dark:bg-gray-900/70 px-2.5 py-1 rounded border border-gray-700/60 whitespace-nowrap">
+                                    <div class="flex items-center gap-1.5 whitespace-nowrap">
+                                        <span class="w-2 h-2 rounded-full flex-shrink-0 ${dotColor}"></span>
+                                        <span class="font-mono text-[11px] font-medium">${t.name}</span>
                                     </div>
+                                    <span class="font-mono text-[10px] opacity-85 whitespace-nowrap">${st} (${durStr})</span>
                                 </div>
                             `;
-                        } else {
-                            td.innerHTML = `<div class="w-6 h-6 mx-auto bg-transparent border border-gray-100 dark:border-gray-800 border-dashed rounded"></div>`;
-                        }
-                        row.appendChild(td);
-                    });
-                    gridBody.appendChild(row);
-                });
+                        }).join('');
 
-                // Toggle logic (expanded by default so current status is immediately visible)
-                const toggleBtn = clone.querySelector('.grid-toggle');
-                const gridContent = clone.querySelector('.grid-content');
-                const chevron = clone.querySelector('.grid-chevron');
-                gridContent.classList.remove('hidden');
-                chevron.classList.add('rotate-180');
-                
-                toggleBtn.addEventListener('click', () => {
-                    const isHidden = gridContent.classList.contains('hidden');
-                    if (isHidden) {
-                        gridContent.classList.remove('hidden');
-                        chevron.classList.add('rotate-180');
-                    } else {
-                        gridContent.classList.add('hidden');
-                        chevron.classList.remove('rotate-180');
+                        const tooltipHtml = `
+                            <div class="flex items-center justify-between gap-4 border-b border-gray-700 pb-1.5 mb-2 whitespace-nowrap">
+                                <span class="font-bold text-xs font-mono">${colKey} (${cycleStr})</span>
+                                <span class="font-mono text-xs text-emerald-400 font-semibold">${succ}/${total} Succeeded</span>
+                            </div>
+                            <div class="grid gap-1.5" style="grid-template-columns: repeat(${numCols}, max-content);">
+                                ${itemsHtml}
+                            </div>
+                        `;
+                        cellDiv.addEventListener('mouseenter', (e) => showTooltip(e, tooltipHtml));
+                        cellDiv.addEventListener('mousemove', (e) => positionTooltip(e));
+                        cellDiv.addEventListener('mouseleave', hideTooltip);
+                        td.appendChild(cellDiv);
                     }
+
+                    row.appendChild(td);
                 });
 
-                container.appendChild(clone);
-            }
-        }
-
-        // --- Charts Rendering ---
-        function renderCharts(historyData) {
-            if (!historyData || Object.keys(historyData).length === 0) return;
-
-            const isDark = document.documentElement.classList.contains('dark');
-            const textColor = isDark ? '#d1d5db' : '#374151'; // gray-300 : gray-700
-            const gridColor = isDark ? '#374151' : '#e5e7eb'; // gray-700 : gray-200
-
-            // Extract unique timestamps across all experiments, sort them
-            let allTs = new Set();
-            for (const exp of Object.values(historyData)) {
-                if(exp.entries) exp.entries.forEach(e => allTs.add(e.timestamp));
-            }
-            let timestamps = Array.from(allTs).sort((a, b) => new Date(a) - new Date(b));
-            if (timestamps.length === 0) return;
-
-            // Prepare datasets
-            const experiments = Object.keys(historyData);
-            const wallTimeDatasets = [];
-            const deadJobsDatasets = [];
-
-            experiments.forEach((expName, i) => {
-                const color = CHART_COLORS[i % CHART_COLORS.length];
-                const entries = historyData[expName].entries || [];
-                
-                // Map to common timestamps
-                const wtData = timestamps.map(ts => {
-                    const entry = entries.find(e => e.timestamp === ts);
-                    return entry && entry.cycle_wall_time_min != null ? entry.cycle_wall_time_min : null;
-                });
-                
-                const djData = timestamps.map(ts => {
-                    const entry = entries.find(e => e.timestamp === ts);
-                    return entry && entry.dead != null ? entry.dead : null;
-                });
-
-                wallTimeDatasets.push({ label: expName, color, data: wtData });
-                deadJobsDatasets.push({ label: expName, color, data: djData });
+                gridBody.appendChild(row);
             });
 
-            // Format X-axis labels (MM/DD HH:mm)
-            const labels = timestamps.map(ts => {
-                const d = new Date(ts);
-                return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-            });
-
-            // Draw Charts
-            drawChart('wallTimeChart', 'wallTimeLegend', labels, wallTimeDatasets, textColor, gridColor, false);
-            drawChart('deadJobsChart', 'deadJobsLegend', labels, deadJobsDatasets, textColor, gridColor, true);
-        }
-
-        function drawChart(canvasId, legendId, labels, datasets, textColor, gridColor, isIntY) {
-            const canvas = document.getElementById(canvasId);
-            if (!canvas) return;
-            
-            const ctx = canvas.getContext('2d');
-            
-            // Handle DPI scaling
-            const dpr = window.devicePixelRatio || 1;
-            const rect = canvas.parentElement.getBoundingClientRect();
-            canvas.width = rect.width * dpr;
-            canvas.height = rect.height * dpr;
-            ctx.scale(dpr, dpr);
-            
-            const w = rect.width;
-            const h = rect.height;
-
-            ctx.clearRect(0, 0, w, h);
-
-            // Chart layout
-            const padding = { top: 20, right: 20, bottom: 30, left: 40 };
-            const chartW = w - padding.left - padding.right;
-            const chartH = h - padding.top - padding.bottom;
-
-            // Find Min/Max Y
-            let minY = 0;
-            let maxY = 0;
-            datasets.forEach(ds => {
-                ds.data.forEach(val => {
-                    if (val !== null) {
-                        if (val > maxY) maxY = val;
-                    }
-                });
-            });
-            if (maxY === 0) maxY = 10; // Default if all zero
-            maxY = Math.ceil(maxY * 1.1); // 10% padding
-            if (isIntY) maxY = Math.ceil(maxY);
-
-            // Draw Y Grid & Labels
-            ctx.font = '10px sans-serif';
-            ctx.fillStyle = textColor;
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'middle';
-
-            const yTicks = 5;
-            for (let i = 0; i <= yTicks; i++) {
-                const yVal = (maxY / yTicks) * i;
-                const yPos = padding.top + chartH - (i / yTicks) * chartH;
-                
-                // Grid line
-                ctx.beginPath();
-                ctx.moveTo(padding.left, yPos);
-                ctx.lineTo(w - padding.right, yPos);
-                ctx.strokeStyle = gridColor;
-                ctx.lineWidth = 1;
-                ctx.stroke();
-
-                // Label
-                ctx.fillText(isIntY ? Math.round(yVal) : yVal.toFixed(1), padding.left - 5, yPos);
-            }
-
-            // Draw X Axis Labels (skip some if too many)
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            const stepX = chartW / Math.max(1, (labels.length - 1));
-            const skip = Math.max(1, Math.ceil(labels.length / 8));
-
-            labels.forEach((lbl, i) => {
-                const xPos = padding.left + i * stepX;
-                if (i % skip === 0 || i === labels.length - 1) {
-                    ctx.fillText(lbl, xPos, h - padding.bottom + 5);
+            // Collapse/expand toggle
+            const toggleBtn = clone.querySelector('.grid-toggle');
+            const gridContent = clone.querySelector('.grid-content');
+            const chevron = clone.querySelector('.grid-chevron');
+            toggleBtn.addEventListener('click', () => {
+                const isHidden = gridContent.classList.contains('hidden');
+                if (isHidden) {
+                    gridContent.classList.remove('hidden');
+                    chevron.classList.add('rotate-180');
+                } else {
+                    gridContent.classList.add('hidden');
+                    chevron.classList.remove('rotate-180');
                 }
             });
 
-            // Draw Lines and Points
-            datasets.forEach(ds => {
-                ctx.beginPath();
-                let hasMoved = false;
-                
-                ds.data.forEach((val, i) => {
-                    if (val === null) return;
-                    
-                    const xPos = padding.left + i * stepX;
-                    const yPos = padding.top + chartH - ((val / maxY) * chartH);
-                    
-                    if (!hasMoved) {
-                        ctx.moveTo(xPos, yPos);
-                        hasMoved = true;
-                    } else {
-                        ctx.lineTo(xPos, yPos);
-                    }
-                });
-                
-                ctx.strokeStyle = ds.color;
-                ctx.lineWidth = 2;
-                ctx.lineJoin = 'round';
-                ctx.stroke();
-
-                // Draw dots
-                ds.data.forEach((val, i) => {
-                    if (val === null) return;
-                    const xPos = padding.left + i * stepX;
-                    const yPos = padding.top + chartH - ((val / maxY) * chartH);
-                    
-                    ctx.beginPath();
-                    ctx.arc(xPos, yPos, 3, 0, Math.PI * 2);
-                    ctx.fillStyle = document.documentElement.classList.contains('dark') ? '#1f2937' : '#ffffff';
-                    ctx.fill();
-                    ctx.strokeStyle = ds.color;
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                });
-            });
-
-            // Update Legend
-            const legend = document.getElementById(legendId);
-            if (legend) {
-                legend.innerHTML = datasets.map(ds => `
-                    <div class="flex items-center gap-1">
-                        <div class="w-3 h-3 rounded-full" style="background-color: ${ds.color}"></div>
-                        <span class="text-gray-600 dark:text-gray-400">${ds.label}</span>
-                    </div>
-                `).join('');
-            }
+            container.appendChild(clone);
         }
-
-        // Handle window resize to redraw charts
-        window.addEventListener('resize', () => {
-            if (window.lastHistoryData) {
-                renderCharts(window.lastHistoryData);
-            }
-        });
-
     </script>
 </body>
 </html>
