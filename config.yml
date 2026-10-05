@@ -2,6 +2,7 @@
 # Shared defaults under `common:` apply to all experiments and can be overridden per experiment.
 
 common:
+  default_exp: ursa/rrfsv2x_det
   workflow_xml: rrfs.xml
   workflow_db: rrfs.db
   lookback_cycles: 72

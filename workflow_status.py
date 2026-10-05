@@ -580,6 +580,11 @@ def process_experiment(
     # 1. Parse rocotostat
     cycles = parse_rocotostat(expdir, xml, db, lookback)
     status = build_status_dict(exp_name, cluster, cycles)
+    default_exp = str(exp_cfg.get("default_exp", "") or "").strip()
+    if exp_cfg.get("default") or default_exp in (f"{cluster}/{exp_name}", exp_name):
+        status["default"] = True
+    if default_exp:
+        status["default_exp"] = default_exp
 
     # 2. Dead job check
     if dead_cfg.get("enabled", True):
@@ -680,7 +685,10 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
-    config_file = Path(args.config).resolve()
+    config_path = Path(args.config)
+    if not config_path.is_file() and not config_path.is_absolute():
+        config_path = REPO_ROOT / config_path
+    config_file = config_path.resolve()
     if not config_file.is_file():
         print(f"ERROR: Config file not found: {config_file}", file=sys.stderr)
         return 1

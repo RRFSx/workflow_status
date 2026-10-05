@@ -13,6 +13,7 @@ set -o pipefail
 unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
 ROCOTO_MOD="${ROCOTO_MOD:-rocoto/1.3.7g}"
 
 if [[ -z "${MACHINE:-}" ]]; then

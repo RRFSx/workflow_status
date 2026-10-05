@@ -263,8 +263,8 @@
             return 'guoqing-noaa/workflow_status';
         })();
 
-        // Default landing experiment ('<machine>/<exp>' or '<exp>'). Falls back to first entry if not found.
-        const DEFAULT_EXP = 'ursa/rrfsv2x_det';
+        // Default landing experiment is read from `default_exp` / `default: true` in `config.yml` (via <exp>.json).
+        const DEFAULT_EXP = '';
         const REFRESH_INTERVAL = 120; // seconds
 
         // --- State ---
@@ -555,7 +555,24 @@
             if (selectedExpKey && currentStatusData[selectedExpKey]) {
                 return;
             }
-            // 1. Check DEFAULT_EXP constant in index.html
+            // 1. Check `default: true` set via `config.yml` (`default_exp: <machine>/<exp>` or `default: true`)
+            const directDefault = keys.find(k => currentStatusData[k] && currentStatusData[k].default === true);
+            if (directDefault) {
+                selectedExpKey = directDefault;
+                return;
+            }
+            // 2. Check `default_exp` field from any loaded <exp>.json
+            for (const k of keys) {
+                const target = currentStatusData[k] && currentStatusData[k].default_exp;
+                if (target) {
+                    const match = keys.find(key => key === target || key.endsWith(`/${target}`));
+                    if (match) {
+                        selectedExpKey = match;
+                        return;
+                    }
+                }
+            }
+            // 3. Optional fallback constant in index.html
             if (DEFAULT_EXP) {
                 const matchKey = keys.find(k => k === DEFAULT_EXP || k.endsWith(`/${DEFAULT_EXP}`));
                 if (matchKey) {
@@ -563,7 +580,7 @@
                     return;
                 }
             }
-            // 2. Fallback to the first entry
+            // 4. Fallback to the first entry
             selectedExpKey = keys[0];
         }
 
