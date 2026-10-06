@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# workflow_status.sh — Launcher for workflow_status.py on NOAA HPC clusters
+# run.sh — Launcher for workflow_status.py on NOAA HPC clusters
 #
 # Resolves the machine's pyDAmonitor Python executable and Rocoto module,
 # then executes workflow_status.py without needing `conda activate`.
 #
 # Usage:
-#   MACHINE=gaeac7 ./workflow_status.sh [myexps.yml] [--dry-run] [--verbose]
+#   MACHINE=gaeac7 ./run.sh [myexps.yml] [--dry-run] [--verbose]
 
 set -o pipefail
 

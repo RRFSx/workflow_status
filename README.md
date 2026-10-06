@@ -18,8 +18,8 @@ A config-driven Python monitoring system for Rocoto-based HPC workflows with a G
 ## Prerequisites
 
 1. **Git SSH access** (`git@github.com:...`) configured on the HPC cluster (with an SSH key that does not prompt for an interactive passphrase when running under `scrontab`).
-2. **`pyDAmonitor` Conda environment** (`Miniforge3/envs/pyDAmonitor/bin/python3`), invoked directly by [`workflow_status.sh`](workflow_status.sh) without needing `conda activate`.
-3. **Rocoto** module on the target HPC cluster (automatically loaded by [`workflow_status.sh`](workflow_status.sh)).
+2. **`pyDAmonitor` Conda environment** (`Miniforge3/envs/pyDAmonitor/bin/python3`), invoked directly by [`run.sh`](run.sh) without needing `conda activate`.
+3. **Rocoto** module on the target HPC cluster (automatically loaded by [`run.sh`](run.sh)).
 
 ## Supported HPC Systems (`MACHINE` values)
 
@@ -80,10 +80,10 @@ chmod 600 healthchecks_uuid.txt
 
 ### 3. Test (`--dry-run`)
 
-By default, [`workflow_status.sh`](workflow_status.sh) reads `myexps.yml` in the repo root (or you can pass a custom `.yaml`/`.yml` path):
+By default, [`run.sh`](run.sh) reads `myexps.yml` in the repo root (or you can pass a custom `.yaml`/`.yml` path):
 
 ```bash
-MACHINE=gaeac7 ./workflow_status.sh --dry-run
+MACHINE=gaeac7 ./run.sh --dry-run
 ```
 
 ### 4. Add to `scrontab`
@@ -96,7 +96,7 @@ MACHINE=gaeac7 ./workflow_status.sh --dry-run
 #SCRON --dependency=singleton
 #SCRON --job-name=workflow_status
 #SCRON --output=/dev/null
-*/10 * * * * MACHINE=gaeac7 /path/to/workflow_status/workflow_status.sh
+*/10 * * * * MACHINE=gaeac7 /path/to/workflow_status/run.sh
 ```
 
 ## Repository Structure
@@ -106,7 +106,7 @@ workflow_status/
 ├── README.md
 ├── config.yml                   # Example config template (copy to myexps.yml)
 ├── myexps.yml                   # Untracked local user config (git-ignored)
-├── workflow_status.sh           # Thin launcher (uses MACHINE to set Rocoto + pyDAmonitor python3)
+├── run.sh                       # Thin launcher (uses MACHINE to set Rocoto + pyDAmonitor python3)
 ├── workflow_status.py           # Core monitoring engine (pushes <exp>.json to branch status-<MACHINE>)
 ├── docs/                        # GitHub Pages dashboard (reads status-* branches across all HPCs)
 │   └── index.html

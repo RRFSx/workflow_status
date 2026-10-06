@@ -3,7 +3,7 @@
 workflow_status.py — Unified HPC Rocoto Workflow Monitor
 
 Usage:
-  MACHINE=gaeac7 ./workflow_status.sh [myexps.yml] [--dry-run] [--verbose]
+  MACHINE=gaeac7 ./run.sh [myexps.yml] [--dry-run] [--verbose]
 
 Features:
   - Reads `myexps.yml` (default: `<repo_root>/myexps.yml`, copied from template `config.yml`)
@@ -76,7 +76,7 @@ def compute_wall_time_min(activated: Optional[str], deactivated: Optional[str]) 
 
 
 def run_rocoto_cmd(cmd: List[str], expdir: Path) -> str:
-    """Run a rocoto command inside expdir (rocoto module is loaded by workflow_status.sh)."""
+    """Run a rocoto command inside expdir (rocoto module is loaded by run.sh)."""
     proc = subprocess.run(
         cmd,
         cwd=str(expdir),
