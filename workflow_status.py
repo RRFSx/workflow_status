@@ -327,6 +327,7 @@ def check_stall(
     status: Dict[str, Any], state: Dict[str, Any], threshold_sec: int
 ) -> Tuple[bool, int]:
     summary = status.get("summary", {})
+    active_cycles = summary.get("active_cycles", 0)
     active_jobs = (
         summary.get("running", 0)
         + summary.get("queued", 0)
@@ -334,29 +335,41 @@ def check_stall(
     )
     now = int(time.time())
 
-    if active_jobs == 0:
-        stall_since = state.get("stall_since")
-        if not stall_since:
-            state["stall_since"] = now
-            state["stall_alerted"] = False
-            status["alerts"]["stall"] = False
-            status["alerts"]["stall_since"] = None
-            return False, 0
-
-        duration = now - int(stall_since)
-        if duration > threshold_sec:
-            status["alerts"]["stall"] = True
-            status["alerts"]["stall_since"] = int(stall_since)
-            if not state.get("stall_alerted", False):
-                state["stall_alerted"] = True
-                return True, duration
-        return False, duration
-    else:
+    # If there are no Active cycles in lookback_cycles, do not detect stall
+    if active_cycles == 0 or active_jobs > 0:
         state["stall_since"] = None
         state["stall_alerted"] = False
         status["alerts"]["stall"] = False
         status["alerts"]["stall_since"] = None
         return False, 0
+
+    # Check if any task in an Active cycle changed state/tries since the last check
+    progress_lines = []
+    for c in status.get("cycles", []):
+        if c.get("cycle_state") == "Active":
+            cdate = c.get("cdate", "")
+            for t in c.get("tasks", []):
+                progress_lines.append(f"{cdate}|{t.get('name')}|{t.get('state')}|{t.get('tries')}")
+    progress_hash = hashlib.md5("\n".join(progress_lines).encode("utf-8")).hexdigest()
+    prev_progress_hash = state.get("active_progress_hash", "")
+    state["active_progress_hash"] = progress_hash
+
+    stall_since = state.get("stall_since")
+    if not stall_since or (prev_progress_hash and progress_hash != prev_progress_hash):
+        state["stall_since"] = now
+        state["stall_alerted"] = False
+        status["alerts"]["stall"] = False
+        status["alerts"]["stall_since"] = None
+        return False, 0
+
+    duration = now - int(stall_since)
+    if duration > threshold_sec:
+        status["alerts"]["stall"] = True
+        status["alerts"]["stall_since"] = int(stall_since)
+        if not state.get("stall_alerted", False):
+            state["stall_alerted"] = True
+            return True, duration
+    return False, duration
 
 
 def check_hung_jobs(

@@ -675,10 +675,17 @@
             selectedExpKey = keys[0];
         }
 
+        function hasActiveCycle(data) {
+            if (data.summary && typeof data.summary.active_cycles === 'number') {
+                return data.summary.active_cycles > 0;
+            }
+            return (data.cycles || []).some(c => c.cycle_state === 'Active');
+        }
+
         function getExperimentHealth(data) {
             const alerts = data.alerts || {};
             const deadCount = (alerts.dead_jobs && alerts.dead_jobs.length) || (data.summary && data.summary.dead) || 0;
-            const hasStall = Boolean(alerts.stall);
+            const hasStall = Boolean(alerts.stall) && hasActiveCycle(data);
             const hungCount = (alerts.hung_jobs && alerts.hung_jobs.length) || 0;
 
             const updatedTime = new Date(data.updated_at);
@@ -822,7 +829,7 @@
                             <div><strong>Dead Jobs:</strong> ${data.alerts.dead_jobs.map(j => `${j.task} (${j.cycle})`).join(', ')}</div>
                         </div>`;
                 }
-                if (data.alerts.stall) {
+                if (data.alerts.stall && hasActiveCycle(data)) {
                     const stallDate = data.alerts.stall_since
                         ? new Date(isNaN(Number(data.alerts.stall_since)) ? data.alerts.stall_since : Number(data.alerts.stall_since) * 1000)
                         : null;
