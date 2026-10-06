@@ -1,4 +1,5 @@
-# State files and secrets (generated on HPC, not committed)
+# State files, user experiment config, and secrets (generated on HPC, not committed)
+myexps.yml
 .state/
 healthchecks_uuid.txt
 

@@ -1,4 +1,5 @@
-# config.yml — Configuration for workflow_status
+# config.yml — Example configuration template for workflow_status
+# Copy this file to `myexps.yml` (git-ignored) and make modifications there:
 # Shared defaults under `common:` apply to all experiments and can be overridden per experiment.
 
 common:
@@ -7,7 +8,7 @@ common:
   workflow_db: rrfs.db
   lookback_cycles: 72
   recipients:
-    - Guoqing.Ge@noaa.gov
+    - first.last@noaa.gov
   checks:
     dead_jobs:
       enabled: true

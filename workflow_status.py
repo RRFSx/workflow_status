@@ -3,11 +3,11 @@
 workflow_status.py — Unified HPC Rocoto Workflow Monitor
 
 Usage:
-  MACHINE=gaeac7 ./workflow_status.sh [config.yml] [--dry-run] [--verbose]
+  MACHINE=gaeac7 ./workflow_status.sh [myexps.yml] [--dry-run] [--verbose]
 
 Features:
-  - Reads `config.yml` (default: `<repo_root>/config.yml`) with a `common:` section
-    and an `experiments:` list, deep-merging each experiment's overrides on top of `common:`
+  - Reads `myexps.yml` (default: `<repo_root>/myexps.yml`, copied from template `config.yml`)
+    with a `common:` section and an `experiments:` list, deep-merging each experiment's overrides on top of `common:`
   - Queries `rocotostat -s` and `rocotostat -c` for both realtime & retrospective runs
   - Detects new DEAD jobs (MD5-deduplicated), workflow stalls, and hung jobs (log staleness)
   - Sends email alerts via `mail` only on state transitions
@@ -674,8 +674,8 @@ def main() -> int:
     parser.add_argument(
         "config",
         nargs="?",
-        default=str(REPO_ROOT / "config.yml"),
-        help="Path to YAML config file (default: <repo_root>/config.yml)",
+        default=str(REPO_ROOT / "myexps.yml"),
+        help="Path to YAML config file (default: <repo_root>/myexps.yml)",
     )
     parser.add_argument(
         "--dry-run",
@@ -690,7 +690,12 @@ def main() -> int:
         config_path = REPO_ROOT / config_path
     config_file = config_path.resolve()
     if not config_file.is_file():
-        print(f"ERROR: Config file not found: {config_file}", file=sys.stderr)
+        print(
+            f"ERROR: Config file not found: {config_file}\n"
+            f"Please copy the example template first:\n"
+            f"  cp {REPO_ROOT / 'config.yml'} {REPO_ROOT / 'myexps.yml'}",
+            file=sys.stderr,
+        )
         return 1
 
     state_dir = REPO_ROOT / ".state"

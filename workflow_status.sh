@@ -5,7 +5,7 @@
 # then executes workflow_status.py without needing `conda activate`.
 #
 # Usage:
-#   MACHINE=gaeac7 ./workflow_status.sh [config.yml] [--dry-run] [--verbose]
+#   MACHINE=gaeac7 ./workflow_status.sh [myexps.yml] [--dry-run] [--verbose]
 
 set -o pipefail
 
@@ -18,7 +18,7 @@ ROCOTO_MOD="${ROCOTO_MOD:-rocoto/1.3.7g}"
 
 if [[ -z "${MACHINE:-}" ]]; then
   echo "ERROR: MACHINE environment variable is required." >&2
-  echo "Usage: MACHINE=<gaeac6|gaeac7|hera|ursa|orion|hercules|derecho> $(basename "$0") [config.yml] [--dry-run]" >&2
+  echo "Usage: MACHINE=<gaeac6|gaeac7|hera|ursa|orion|hercules|derecho> $(basename "$0") [myexps.yml] [--dry-run]" >&2
   exit 1
 fi
 export MACHINE

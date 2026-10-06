@@ -4,12 +4,12 @@ A config-driven Python monitoring system for Rocoto-based HPC workflows with a G
 
 ## Features
 
-- **Single [`config.yml`](config.yml) configuration** — define shared defaults under `common:` and list all experiments under `experiments:` (each experiment inherits `common:` and can override any setting).
+- **Untracked [`myexps.yml`](config.yml) user configuration** — copy the tracked template [`config.yml`](config.yml) to `myexps.yml` (git-ignored) so sensitive information (email addresses, local experiment paths) stays out of GitHub and `git pull` never conflicts.
 - **Full `rocotostat` structured parsing** — uses `rocotostat -s` to discover all `Active` cycles + the last $N$ `Done` cycles (works identically for **realtime** and **retrospective** workflows), then parses full task state and cycle wall-clock duration.
 - **Dead job detection** — alerts on new `DEAD` jobs with MD5 deduplication (no repeated emails for the same failure).
 - **Stall detection** — alerts when no jobs are running/queued/submitting beyond a configurable threshold.
 - **Hung job detection** — optionally checks one or more `RUNNING` task types (`fcst`, `jedivar`, etc.) for stale log files, with optional `cancel_and_reboot` auto-remediation.
-- **Zero-conflict per-HPC branches (`status-<MACHINE>`)** — each HPC pushes `<exp>.json` (containing both current status and rolling 7-day `history`) directly to its own dedicated branch `status-<MACHINE>` (`https://raw.githubusercontent.com/<owner>/<repo>/status-<machine>/<exp>.json`) without modifying the working tree or `main` branch.
+- **Zero-conflict per-HPC branches (`status-<MACHINE>`)** — each HPC pushes `<exp>.json` directly to its own dedicated branch `status-<MACHINE>` (`https://raw.githubusercontent.com/<owner>/<repo>/status-<machine>/<exp>.json`) without modifying the working tree or `main` branch.
 - **Three-layer failure detection**:
   1. **healthchecks.io heartbeat** — detects monitor or cluster/scrontab death within ~15 min.
   2. **GitHub Actions watchdog** ([`.github/workflows/stale-check.yml`](.github/workflows/stale-check.yml)) — opens a GitHub Issue if any `<exp>.json` on any `status-*` branch goes $>30$ min stale.
@@ -42,17 +42,22 @@ git clone git@github.com:guoqing-noaa/workflow_status.git
 cd workflow_status
 ```
 
-### 2. Edit `config.yml`
+### 2. Copy `config.yml` to `myexps.yml` and Edit
 
-Edit [`config.yml`](config.yml) to configure `common:` defaults and your list of `experiments:`:
+Copy the example template [`config.yml`](config.yml) to `myexps.yml` (which is ignored by git so sensitive information stays local) and configure `common:` defaults and your `experiments:` list:
+
+```bash
+cp config.yml myexps.yml
+```
 
 ```yaml
 common:
+  default_exp: ursa/rrfsv2x_det
   workflow_xml: rrfs.xml
   workflow_db: rrfs.db
-  lookback_cycles: 4
+  lookback_cycles: 72
   recipients:
-    - Guoqing.Ge@noaa.gov
+    - first.last@noaa.gov
   checks:
     dead_jobs:
       enabled: true
@@ -75,7 +80,7 @@ chmod 600 healthchecks_uuid.txt
 
 ### 3. Test (`--dry-run`)
 
-By default, [`workflow_status.sh`](workflow_status.sh) reads `config.yml` in the repo root (or you can pass a custom `.yml` path):
+By default, [`workflow_status.sh`](workflow_status.sh) reads `myexps.yml` in the repo root (or you can pass a custom `.yaml`/`.yml` path):
 
 ```bash
 MACHINE=gaeac7 ./workflow_status.sh --dry-run
@@ -99,7 +104,8 @@ MACHINE=gaeac7 ./workflow_status.sh --dry-run
 ```
 workflow_status/
 ├── README.md
-├── config.yml                   # Unified config (common defaults + experiments list)
+├── config.yml                   # Example config template (copy to myexps.yml)
+├── myexps.yml                   # Untracked local user config (git-ignored)
 ├── workflow_status.sh           # Thin launcher (uses MACHINE to set Rocoto + pyDAmonitor python3)
 ├── workflow_status.py           # Core monitoring engine (pushes <exp>.json to branch status-<MACHINE>)
 ├── docs/                        # GitHub Pages dashboard (reads status-* branches across all HPCs)

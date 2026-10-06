@@ -258,7 +258,7 @@
             return 'guoqing-noaa/workflow_status';
         })();
 
-        // Default landing experiment is read from `default_exp` / `default: true` in `config.yml` (via <exp>.json).
+        // Default landing experiment is read from `default_exp` / `default: true` in `myexps.yml` (via <exp>.json).
         const DEFAULT_EXP = '';
         const REFRESH_INTERVAL = 120; // seconds
 
@@ -801,7 +801,7 @@
             const gridHeader = clone.querySelector('.exp-grid-header');
             const gridBody = clone.querySelector('.exp-grid-body');
 
-            const colOrder = [];
+            const discoveredCols = [];
             const colMeta = {};
             const cycles = [...rawCycles].reverse(); // Newest cycle first
 
@@ -810,10 +810,32 @@
                     const info = getTaskColumnInfo(t.name);
                     if (!colMeta[info.colKey]) {
                         colMeta[info.colKey] = info;
-                        colOrder.push(info.colKey);
+                        discoveredCols.push(info.colKey);
                     }
                 });
             });
+
+            // Keep discovery order, except:
+            // 1. Place fcst_l, fcst_xl, fcst_xxl, fcst_xxxl, etc. immediately after fcst (or fcst_m*)
+            // 2. Place archive and clean as the last two columns
+            const fcstExtRe = /^fcst_(x*l)(?:_.*)?$/i;
+            const fcstExtCols = discoveredCols
+                .filter(k => fcstExtRe.test(k))
+                .sort((a, b) => a.match(fcstExtRe)[1].length - b.match(fcstExtRe)[1].length);
+            const endCols = ['archive', 'clean'].filter(endKey =>
+                discoveredCols.some(k => k.toLowerCase() === endKey)
+            ).map(endKey => discoveredCols.find(k => k.toLowerCase() === endKey));
+
+            const baseCols = discoveredCols.filter(
+                k => !fcstExtRe.test(k) && !['archive', 'clean'].includes(k.toLowerCase())
+            );
+            const fcstIdx = baseCols.findIndex(k => /^fcst(_m\*)?$/i.test(k));
+            if (fcstIdx !== -1 && fcstExtCols.length > 0) {
+                baseCols.splice(fcstIdx + 1, 0, ...fcstExtCols);
+            } else if (fcstExtCols.length > 0) {
+                baseCols.push(...fcstExtCols);
+            }
+            const colOrder = [...baseCols, ...endCols];
 
             // Header row
             gridHeader.innerHTML = `<th class="p-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 w-28 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky left-0 z-10 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]">Cycle</th>`;
