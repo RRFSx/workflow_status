@@ -675,30 +675,43 @@
             selectedExpKey = keys[0];
         }
 
-        function hasActiveCycle(data) {
-            if (data.summary && typeof data.summary.active_cycles === 'number') {
-                return data.summary.active_cycles > 0;
+        function isRetroAllDone(data) {
+            const cycles = data.cycles || [];
+            if (cycles.length === 0) return false;
+            const allDone = cycles.every(c => (c.cycle_state || '').toLowerCase() === 'done');
+            if (!allDone) return false;
+            const latestCdate = cycles.map(c => c.cdate || '').sort().pop() || '';
+            if (latestCdate.length >= 10) {
+                const y = Number(latestCdate.slice(0, 4));
+                const m = Number(latestCdate.slice(4, 6)) - 1;
+                const d = Number(latestCdate.slice(6, 8));
+                const h = Number(latestCdate.slice(8, 10));
+                const cycTime = Date.UTC(y, m, d, h);
+                if (!isNaN(cycTime) && (Date.now() - cycTime) > 48 * 3600 * 1000) {
+                    return true;
+                }
             }
-            return (data.cycles || []).some(c => c.cycle_state === 'Active');
+            return false;
         }
 
         function getExperimentHealth(data) {
             const alerts = data.alerts || {};
+            const isDone = isRetroAllDone(data);
             const deadCount = (alerts.dead_jobs && alerts.dead_jobs.length) || (data.summary && data.summary.dead) || 0;
-            const hasStall = Boolean(alerts.stall) && hasActiveCycle(data);
+            const hasStall = Boolean(alerts.stall) && !isDone;
             const hungCount = (alerts.hung_jobs && alerts.hung_jobs.length) || 0;
 
             const updatedTime = new Date(data.updated_at);
             const diffMin = Math.floor((new Date() - updatedTime) / 60000);
-            const isStale = isNaN(diffMin) || diffMin >= 30;
+            const isStale = (isNaN(diffMin) || diffMin >= 30) && !isDone;
 
             if (deadCount > 0 || hasStall || hungCount > 0) {
-                return { status: 'error', deadCount, hasStall, hungCount, diffMin };
+                return { status: 'error', isDone: false, deadCount, hasStall, hungCount, diffMin };
             }
             if (isStale) {
-                return { status: 'stale', deadCount: 0, hasStall: false, hungCount: 0, diffMin };
+                return { status: 'stale', isDone: false, deadCount: 0, hasStall: false, hungCount: 0, diffMin };
             }
-            return { status: 'healthy', deadCount: 0, hasStall: false, hungCount: 0, diffMin };
+            return { status: 'healthy', isDone, deadCount: 0, hasStall: false, hungCount: 0, diffMin };
         }
 
         // --- Sidebar Rendering ---
@@ -725,7 +738,8 @@
                         ? 'bg-emerald-100/90 dark:bg-emerald-900/50 border-emerald-500 dark:border-emerald-400 text-emerald-950 dark:text-emerald-100 ring-2 ring-emerald-500/40 shadow-sm'
                         : 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/70 text-emerald-900 dark:text-emerald-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40';
                     dotClasses = 'bg-emerald-500';
-                    badgeHtml = `<span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-200/80 dark:bg-emerald-800/70 text-emerald-800 dark:text-emerald-200">OK</span>`;
+                    const okLabel = health.isDone ? 'DONE' : 'OK';
+                    badgeHtml = `<span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-200/80 dark:bg-emerald-800/70 text-emerald-800 dark:text-emerald-200">${okLabel}</span>`;
                 } else if (health.status === 'error') {
                     colorClasses = isSelected
                         ? 'bg-red-100/90 dark:bg-red-900/50 border-red-500 dark:border-red-400 text-red-950 dark:text-red-100 ring-2 ring-red-500/40 shadow-sm'
@@ -829,7 +843,7 @@
                             <div><strong>Dead Jobs:</strong> ${data.alerts.dead_jobs.map(j => `${j.task} (${j.cycle})`).join(', ')}</div>
                         </div>`;
                 }
-                if (data.alerts.stall && hasActiveCycle(data)) {
+                if (data.alerts.stall && !isRetroAllDone(data)) {
                     const stallDate = data.alerts.stall_since
                         ? new Date(isNaN(Number(data.alerts.stall_since)) ? data.alerts.stall_since : Number(data.alerts.stall_since) * 1000)
                         : null;
