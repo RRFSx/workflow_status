@@ -476,6 +476,20 @@ def git_push_status_branch(repo_root: Path, updated_files: List[Path], branch: s
             return False
         existing_blobs[f.name] = ho.stdout.strip()
 
+    # Also write _index.json listing all <exp>.json files on this branch so the dashboard
+    # can discover experiments via raw.githubusercontent.com without hitting api.github.com rate limits
+    index_payload = json.dumps({"files": sorted(existing_blobs.keys()), "updated_at": utc_now_iso()}, indent=2) + "\n"
+    ho_idx = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=str(repo_root),
+        input=index_payload,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if ho_idx.returncode == 0:
+        existing_blobs["_index.json"] = ho_idx.stdout.strip()
+
     tree_lines = [
         f"100644 blob {sha}\t{fname}"
         for fname, sha in sorted(existing_blobs.items())

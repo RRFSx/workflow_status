@@ -23,7 +23,7 @@ jobs:
             branch="${ref#origin/}"
             machine="${branch#status-}"
 
-            for f in $(git ls-tree --name-only "$ref" | grep -E '^[^/]+\.json$' || true); do
+            for f in $(git ls-tree --name-only "$ref" | grep -E '^[^/_][^/]*\.json$' || true); do
               content=$(git show "${ref}:${f}" 2>/dev/null || true)
               [[ -z "$content" ]] && continue
 

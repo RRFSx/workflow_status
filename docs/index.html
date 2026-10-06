@@ -455,55 +455,144 @@
             document.getElementById('last-update-time').textContent = now.toLocaleTimeString();
         }
 
+        const KNOWN_CLUSTERS = ['ursa', 'gaeac6', 'gaeac7', 'hera', 'orion', 'hercules', 'derecho'];
+        const TARGET_CACHE_KEY = 'wf_status_targets_v1';
+        const TARGET_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
         // --- Data Fetching ---
+        async function discoverTargets() {
+            const targetMap = new Map();
+            const addTarget = (t) => {
+                if (!t || !t.cluster || !t.path || t.path.startsWith('_')) return;
+                const key = `${t.cluster}/${t.name || t.path.replace(/\.json$/, '')}`;
+                targetMap.set(key, {
+                    branch: t.branch || `status-${t.cluster}`,
+                    ref: t.ref || t.branch || `status-${t.cluster}`,
+                    cluster: t.cluster,
+                    path: t.path,
+                    name: t.name || t.path.replace(/\.json$/, '')
+                });
+            };
+
+            // 1. Load cached targets from localStorage if available
+            let cacheAgeMs = Infinity;
+            try {
+                const rawCache = localStorage.getItem(TARGET_CACHE_KEY);
+                if (rawCache) {
+                    const parsed = JSON.parse(rawCache);
+                    if (parsed && Array.isArray(parsed.targets)) {
+                        parsed.targets.forEach(addTarget);
+                        cacheAgeMs = Date.now() - (parsed.ts || 0);
+                    }
+                }
+            } catch (e) {}
+
+            // 2. Check _index.json on raw.githubusercontent.com across known clusters (zero GitHub API rate limit!)
+            await Promise.all(KNOWN_CLUSTERS.map(async (cluster) => {
+                const branch = `status-${cluster}`;
+                try {
+                    const idxResp = await fetch(`https://raw.githubusercontent.com/${REPO}/${branch}/_index.json`, { cache: "no-store" });
+                    if (idxResp.ok) {
+                        const idxData = await idxResp.json();
+                        // Remove stale entries for this cluster and replace with _index.json list
+                        for (const k of Array.from(targetMap.keys())) {
+                            if (k.startsWith(`${cluster}/`)) targetMap.delete(k);
+                        }
+                        (idxData.files || []).forEach(fname => {
+                            if (/^[^/_][^/]*\.json$/.test(fname)) {
+                                addTarget({ branch, ref: branch, cluster, path: fname, name: fname.replace(/\.json$/, '') });
+                            }
+                        });
+                    }
+                } catch (e) {}
+            }));
+
+            // 3. Only call api.github.com if cache is expired (>15m) or we have no targets yet
+            if (targetMap.size === 0 || cacheAgeMs > TARGET_CACHE_TTL_MS) {
+                try {
+                    const branchesUrl = `https://api.github.com/repos/${REPO}/branches?per_page=100`;
+                    const branchesResp = await fetch(branchesUrl, { cache: "no-store" });
+                    if (branchesResp.ok) {
+                        const branches = await branchesResp.json();
+                        const statusBranches = (branches || [])
+                            .filter(b => b.name && b.name.startsWith('status-'))
+                            .map(b => ({ name: b.name, ref: (b.commit && b.commit.sha) ? b.commit.sha : b.name }));
+
+                        const apiTargets = [];
+                        await Promise.all(statusBranches.map(async (bObj) => {
+                            const branch = bObj.name;
+                            const ref = bObj.ref;
+                            const cluster = branch.replace(/^status-/, '');
+                            const treeResp = await fetch(`https://api.github.com/repos/${REPO}/git/trees/${ref}`, { cache: "no-store" });
+                            if (!treeResp.ok) return;
+                            const treeData = await treeResp.json();
+                            (treeData.tree || [])
+                                .filter(item => item.type === 'blob' && /^[^/_][^/]*\.json$/.test(item.path))
+                                .forEach(item => {
+                                    apiTargets.push({ branch, ref, cluster, path: item.path, name: item.path.replace(/\.json$/, '') });
+                                });
+                        }));
+
+                        if (apiTargets.length > 0) {
+                            targetMap.clear();
+                            apiTargets.forEach(addTarget);
+                            try {
+                                localStorage.setItem(TARGET_CACHE_KEY, JSON.stringify({
+                                    ts: Date.now(),
+                                    targets: Array.from(targetMap.values()).map(t => ({
+                                        branch: t.branch,
+                                        cluster: t.cluster,
+                                        path: t.path,
+                                        name: t.name
+                                    }))
+                                }));
+                            } catch (e) {}
+                        }
+                    } else {
+                        console.warn(`GitHub API returned ${branchesResp.status} (using raw.githubusercontent.com fallback)`);
+                        if (targetMap.size === 0) {
+                            [
+                                { cluster: 'ursa', path: 'rrfsv2x_det.json', name: 'rrfsv2x_det' },
+                                { cluster: 'ursa', path: 'rrfsv2x_ens.json', name: 'rrfsv2x_ens' },
+                                { cluster: 'gaeac6', path: 'conus12km.json', name: 'conus12km' }
+                            ].forEach(addTarget);
+                        }
+                        try {
+                            localStorage.setItem(TARGET_CACHE_KEY, JSON.stringify({
+                                ts: Date.now(),
+                                targets: Array.from(targetMap.values())
+                            }));
+                        } catch (e) {}
+                    }
+                } catch (e) {
+                    console.warn('GitHub API discovery skipped:', e);
+                }
+            }
+
+            // 4. Fallback to known active experiments on raw.githubusercontent.com if API is rate-limited and cache is empty
+            if (targetMap.size === 0) {
+                [
+                    { cluster: 'ursa', path: 'rrfsv2x_det.json', name: 'rrfsv2x_det' },
+                    { cluster: 'ursa', path: 'rrfsv2x_ens.json', name: 'rrfsv2x_ens' },
+                    { cluster: 'gaeac6', path: 'conus12km.json', name: 'conus12km' }
+                ].forEach(addTarget);
+            }
+
+            return Array.from(targetMap.values()).sort((a, b) => `${a.cluster}/${a.name}`.localeCompare(`${b.cluster}/${b.name}`));
+        }
+
         async function loadData() {
             const errorBanner = document.getElementById('error-banner');
 
             try {
-                // 1. Discover all status-<machine> branches via GitHub Branches API
-                const branchesUrl = `https://api.github.com/repos/${REPO}/branches?per_page=100`;
-                const branchesResp = await fetch(branchesUrl, { cache: "no-store" });
-                if (!branchesResp.ok) throw new Error(`GitHub Branches API failed: ${branchesResp.status}`);
-                const branches = await branchesResp.json();
-
-                const statusBranches = (branches || [])
-                    .filter(b => b.name && b.name.startsWith('status-'))
-                    .map(b => ({ name: b.name, ref: (b.commit && b.commit.sha) ? b.commit.sha : b.name }))
-                    .sort((a, b) => a.name.localeCompare(b.name));
-
-                if (statusBranches.length === 0) {
-                    throw new Error('No status-<machine> branches found in repository yet');
-                }
-
-                // 2. Discover root <exp>.json files on each status-<machine> branch
-                const targets = [];
-                await Promise.all(statusBranches.map(async (bObj) => {
-                    const branch = bObj.name;
-                    const ref = bObj.ref;
-                    const cluster = branch.replace(/^status-/, '');
-                    const treeUrl = `https://api.github.com/repos/${REPO}/git/trees/${ref}`;
-                    const treeResp = await fetch(treeUrl, { cache: "no-store" });
-                    if (!treeResp.ok) return;
-                    const treeData = await treeResp.json();
-                    (treeData.tree || [])
-                        .filter(item => item.type === 'blob' && /^[^/]+\.json$/.test(item.path))
-                        .forEach(item => {
-                            targets.push({ branch, ref, cluster, path: item.path, name: item.path.replace(/\.json$/, '') });
-                        });
-                }));
-
+                const targets = await discoverTargets();
                 if (targets.length === 0) {
                     throw new Error('No <exp>.json files found on status-<machine> branches yet');
                 }
 
-                targets.sort((a, b) => `${a.cluster}/${a.name}`.localeCompare(`${b.cluster}/${b.name}`));
-
-                isDemoMode = false;
-                errorBanner.classList.add('hidden');
-
                 const statusData = {};
 
-                // 3. Fetch each <exp>.json (using commit SHA ref from status-<machine> to bypass 5-min CDN cache)
+                // Fetch each <exp>.json from raw.githubusercontent.com (no 60/hr API rate limit)
                 await Promise.all(targets.map(async (t) => {
                     const key = `${t.cluster}/${t.name}`;
                     try {
@@ -517,6 +606,13 @@
                         console.error(`Failed to fetch data for ${key}`, e);
                     }
                 }));
+
+                if (Object.keys(statusData).length === 0) {
+                    throw new Error('Could not load any status JSON files');
+                }
+
+                isDemoMode = false;
+                errorBanner.classList.add('hidden');
 
                 // Ensure sorted keys
                 const sortedStatus = {};
