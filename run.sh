@@ -12,13 +12,14 @@ set -o pipefail
 # Unset SLURM memory variables inherited from scrontab
 unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "${SCRIPT_DIR}"
+export CALLER_PWD="${PWD:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+cd "${SCRIPT_DIR}" 2>/dev/null
 ROCOTO_MOD="${ROCOTO_MOD:-rocoto/1.3.7g}"
 
 if [[ -z "${MACHINE:-}" ]]; then
   echo "ERROR: MACHINE environment variable is required." >&2
-  echo "Usage: MACHINE=<gaeac6|gaeac7|hera|ursa|orion|hercules|derecho> $(basename "$0") [myexps.yml] [--dry-run]" >&2
+  echo "Usage: MACHINE=<gaeac6|gaeac7|hera|ursa|orion|hercules|derecho> $(basename "$0") [myexps.yml] [--dry-run] [--verbose]" >&2
   exit 1
 fi
 export MACHINE

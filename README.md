@@ -80,10 +80,14 @@ chmod 600 healthchecks_uuid.txt
 
 ### 3. Test (`--dry-run`)
 
-By default, [`run.sh`](run.sh) reads `myexps.yml` in the repo root (or you can pass a custom `.yaml`/`.yml` path):
+By default, [`run.sh`](run.sh) reads `myexps.yml` in the repo root, or you can specify any custom `.yml` config file on the command line:
 
 ```bash
+# Use default myexps.yml
 MACHINE=gaeac7 ./run.sh --dry-run
+
+# Or specify a custom YAML config file
+MACHINE=gaeac7 ./run.sh custom_exps.yml --dry-run
 ```
 
 ### 4. Add to `scrontab`
@@ -97,6 +101,8 @@ MACHINE=gaeac7 ./run.sh --dry-run
 #SCRON --job-name=workflow_status
 #SCRON --output=/dev/null
 */10 * * * * MACHINE=gaeac7 /path/to/workflow_status/run.sh
+# Or with a custom config file:
+# */10 * * * * MACHINE=gaeac7 /path/to/workflow_status/run.sh /path/to/custom_exps.yml
 ```
 
 ## Repository Structure

@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(os.path.abspath(__file__)).parent
 CYCLE_RE = re.compile(r"^\d{12}$")
 
 
@@ -589,7 +589,8 @@ def process_experiment(
 
     status_file = state_dir / f"{exp_name}.json"
     state_file = state_dir / f"{exp_name}_{cluster}_state.json"
-    state = load_state(state_file)
+    legacy_state_file = state_dir.parent / f"{exp_name}_{cluster}_state.json"
+    state = load_state(state_file if state_file.is_file() else legacy_state_file)
 
     # 1. Parse rocotostat
     cycles = parse_rocotostat(expdir, xml, db, lookback)
@@ -688,8 +689,15 @@ def main() -> int:
     parser.add_argument(
         "config",
         nargs="?",
-        default=str(REPO_ROOT / "myexps.yml"),
+        default=None,
         help="Path to YAML config file (default: <repo_root>/myexps.yml)",
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        dest="config_opt",
+        default=None,
+        help="Path to YAML config file (alternative flag to positional argument)",
     )
     parser.add_argument(
         "--dry-run",
@@ -699,20 +707,30 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
-    config_path = Path(args.config)
-    if not config_path.is_file() and not config_path.is_absolute():
-        config_path = REPO_ROOT / config_path
-    config_file = config_path.resolve()
+    raw_config_arg = args.config_opt or args.config
+    if raw_config_arg:
+        config_path = Path(raw_config_arg).expanduser()
+        if not config_path.is_absolute():
+            caller_pwd = Path(os.environ.get("CALLER_PWD", os.getcwd()))
+            if (caller_pwd / config_path).is_file():
+                config_path = caller_pwd / config_path
+            else:
+                config_path = REPO_ROOT / config_path
+    else:
+        config_path = REPO_ROOT / "myexps.yml"
+
+    config_file = Path(os.path.abspath(config_path))
     if not config_file.is_file():
         print(
             f"ERROR: Config file not found: {config_file}\n"
-            f"Please copy the example template first:\n"
+            f"Please specify a valid YAML file or create the default myexps.yml:\n"
             f"  cp {REPO_ROOT / 'config.yml'} {REPO_ROOT / 'myexps.yml'}",
             file=sys.stderr,
         )
         return 1
 
-    state_dir = REPO_ROOT / ".state"
+    machine = os.environ.get("MACHINE") or socket.gethostname()
+    state_dir = REPO_ROOT / ".state" / machine
     state_dir.mkdir(parents=True, exist_ok=True)
     log_file = state_dir / "monitor.log"
     if log_file.is_file() and log_file.stat().st_size > 1048576:
@@ -731,8 +749,9 @@ def main() -> int:
 
     status_branch = get_status_branch()
     logging.info(
-        "=== Monitor run started (MACHINE=%s, branch=%s, dry_run=%s) ===",
+        "=== Monitor run started (MACHINE=%s, config=%s, branch=%s, dry_run=%s) ===",
         os.environ.get("MACHINE", "unset"),
+        config_file.name,
         status_branch,
         args.dry_run,
     )
