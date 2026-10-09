@@ -812,17 +812,28 @@ def process_experiment(
     cycles = parse_rocotostat(expdir, xml, db, lookback)
     status = build_status_dict(exp_name, cluster, cycles)
 
-    if rescue_only:
+    # 2. Ensemble fcst rescue check (<= 5 dead fcst_m* tasks, rescue once per cycle/member)
+    if rescue_cfg.get("enabled", False):
         rescued = check_ens_fcst_rescue(status, expdir, rescue_cfg, xml, db, cluster, dry_run)
-        s = status["summary"]
-        logging.info(
-            "Done %s (rescue-only): cycles=%d, dead_tasks=%d, rescued=%d",
-            exp_name,
-            s["total_cycles"],
-            s["dead"],
-            len(rescued),
-        )
-        return expdir
+        if rescued:
+            lines = [
+                f"Ensemble forecast task(s) dead but rescued in {exp_name} on {cluster}",
+                f"Time: {status['updated_at']}",
+                "",
+            ]
+            for r in rescued:
+                lines.append(f"  {r['cycle']} {r['task']} dead but rescued ({r['jobid']})")
+            send_email(f"{subject_prefix}: dead fcst rescued", "\n".join(lines), recipients, dry_run)
+        if rescue_only:
+            s = status["summary"]
+            logging.info(
+                "Done %s (rescue-only): cycles=%d, dead_tasks=%d, rescued=%d",
+                exp_name,
+                s["total_cycles"],
+                s["dead"],
+                len(rescued),
+            )
+            return expdir
 
     status_file = state_dir / f"{exp_name}.json"
     state_file = state_dir / f"{exp_name}_{cluster}_state.json"
@@ -835,7 +846,7 @@ def process_experiment(
     if default_exp:
         status["default_exp"] = default_exp
 
-    # 2. Dead job check
+    # 3. Dead job check
     if dead_cfg.get("enabled", True):
         new_dead, dead_list = check_dead_jobs(status, state)
         if new_dead:
@@ -852,10 +863,6 @@ def process_experiment(
                     f"  Cycle: {d['cycle']}  Task: {d['task']}  JobID: {d['jobid']}  Exit: {d['exit_status']}  Tries: {d['tries']}"
                 )
             send_email(f"{subject_prefix}: dead job(s)", "\n".join(lines), recipients, dry_run)
-
-    # 3. Ensemble fcst rescue check (<= 5 dead fcst_m* tasks, rescue once per cycle/member)
-    if rescue_cfg.get("enabled", False):
-        check_ens_fcst_rescue(status, expdir, rescue_cfg, xml, db, cluster, dry_run)
 
     # 4. Stall check
     if stall_cfg.get("enabled", True):
