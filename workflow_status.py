@@ -773,6 +773,7 @@ def process_experiment(
     exp_cfg: Dict[str, Any],
     state_dir: Path,
     dry_run: bool,
+    rescue_only: bool = False,
 ) -> Optional[Path]:
     exp_name = exp_cfg.get("name")
     cluster = exp_cfg.get("cluster") or os.environ.get("MACHINE") or "unknown"
@@ -782,6 +783,16 @@ def process_experiment(
 
     if not exp_name or not expdir_str:
         logging.error("Missing required experiment fields (name, expdir): %s", exp_cfg)
+        return None
+
+    checks_cfg = exp_cfg.get("checks", {})
+    dead_cfg = checks_cfg.get("dead_jobs", {})
+    stall_cfg = checks_cfg.get("stall", {})
+    hung_cfg = checks_cfg.get("hung_jobs", {})
+    rescue_cfg = checks_cfg.get("ens_fcst_rescue", {})
+
+    if rescue_only and not rescue_cfg.get("enabled", False):
+        logging.info("Skipping %s (ens_fcst_rescue not enabled)", exp_name)
         return None
 
     expdir = Path(expdir_str)
@@ -795,20 +806,27 @@ def process_experiment(
     recipients = parse_recipients(exp_cfg.get("recipients", []))
     subject_prefix = exp_cfg.get("subject_prefix", exp_name)
 
-    checks_cfg = exp_cfg.get("checks", {})
-    dead_cfg = checks_cfg.get("dead_jobs", {})
-    stall_cfg = checks_cfg.get("stall", {})
-    hung_cfg = checks_cfg.get("hung_jobs", {})
-    rescue_cfg = checks_cfg.get("ens_fcst_rescue", {})
+    # 1. Parse rocotostat
+    cycles = parse_rocotostat(expdir, xml, db, lookback)
+    status = build_status_dict(exp_name, cluster, cycles)
+
+    if rescue_only:
+        rescued = check_ens_fcst_rescue(status, expdir, rescue_cfg, xml, db, cluster, dry_run)
+        s = status["summary"]
+        logging.info(
+            "Done %s (rescue-only): cycles=%d, dead_tasks=%d, rescued=%d",
+            exp_name,
+            s["total_cycles"],
+            s["dead"],
+            len(rescued),
+        )
+        return expdir
 
     status_file = state_dir / f"{exp_name}.json"
     state_file = state_dir / f"{exp_name}_{cluster}_state.json"
     legacy_state_file = state_dir.parent / f"{exp_name}_{cluster}_state.json"
     state = load_state(state_file if state_file.is_file() else legacy_state_file)
 
-    # 1. Parse rocotostat
-    cycles = parse_rocotostat(expdir, xml, db, lookback)
-    status = build_status_dict(exp_name, cluster, cycles)
     default_exp = str(exp_cfg.get("default_exp", "") or "").strip()
     if exp_cfg.get("default") or default_exp in (f"{cluster}/{exp_name}", exp_name):
         status["default"] = True
@@ -920,7 +938,7 @@ def main() -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Run checks and update local status JSON files without sending emails or pushing to GitHub",
+        help="Run checks without submitting rescue jobs, sending emails, or pushing to GitHub",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
@@ -965,15 +983,6 @@ def main() -> int:
     )
     logging.Formatter.converter = time.gmtime
 
-    status_branch = get_status_branch()
-    logging.info(
-        "=== Monitor run started (MACHINE=%s, config=%s, branch=%s, dry_run=%s) ===",
-        os.environ.get("MACHINE", "unset"),
-        config_file.name,
-        status_branch,
-        args.dry_run,
-    )
-
     raw_cfg = yaml.safe_load(config_file.read_text()) or {}
     common_cfg = raw_cfg.get("common", {})
     experiments = raw_cfg.get("experiments", [])
@@ -983,12 +992,44 @@ def main() -> int:
         return 1
 
     merged_list = [deep_merge(common_cfg, exp_item) for exp_item in experiments]
+    any_rescue_enabled = any(
+        m.get("checks", {}).get("ens_fcst_rescue", {}).get("enabled", False)
+        for m in merged_list
+    )
+    all_other_checks_disabled = all(
+        not m.get("checks", {}).get("dead_jobs", {}).get("enabled", True)
+        and not m.get("checks", {}).get("stall", {}).get("enabled", True)
+        and not m.get("checks", {}).get("hung_jobs", {}).get("enabled", False)
+        for m in merged_list
+    )
+    rescue_only = (
+        bool(raw_cfg.get("rescue_only", False))
+        or bool(common_cfg.get("rescue_only", False))
+        or (any_rescue_enabled and all_other_checks_disabled)
+    )
+
+    status_branch = get_status_branch()
+    logging.info(
+        "=== Monitor run started (MACHINE=%s, config=%s, branch=%s, dry_run=%s, rescue_only=%s) ===",
+        os.environ.get("MACHINE", "unset"),
+        config_file.name,
+        status_branch,
+        args.dry_run,
+        rescue_only,
+    )
+
     updated_files: List[Path] = []
 
     # Process all experiments concurrently in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(merged_list)) as pool:
         future_map = {
-            pool.submit(process_experiment, m_exp, state_dir, args.dry_run): m_exp.get("name", "unknown")
+            pool.submit(
+                process_experiment,
+                m_exp,
+                state_dir,
+                args.dry_run,
+                rescue_only,
+            ): m_exp.get("name", "unknown")
             for m_exp in merged_list
         }
         for fut in concurrent.futures.as_completed(future_map):
@@ -1001,7 +1042,7 @@ def main() -> int:
                 logging.exception("Error processing %s: %s", name, exc)
 
     ok_count = len(updated_files)
-    if ok_count > 0:
+    if ok_count > 0 and not rescue_only:
         # Run git push and healthchecks heartbeat concurrently
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as net_pool:
             f_push = net_pool.submit(git_push_status_branch, REPO_ROOT, sorted(updated_files), status_branch, args.dry_run)
@@ -1009,7 +1050,7 @@ def main() -> int:
             f_push.result()
             f_ping.result()
 
-    logging.info("=== Monitor run completed (%d/%d experiments succeeded) ===", ok_count, len(experiments))
+    logging.info("=== Monitor run completed (%d/%d experiments processed) ===", ok_count, len(experiments))
     return 0 if ok_count > 0 else 1
 
 

@@ -3,6 +3,7 @@
 # Shared defaults under `common:` apply to all experiments and can be overridden per experiment.
 
 common:
+  # rescue_only: true  # set true to only run ens_fcst_rescue (skip status JSON, emails, and git push)
   default_exp: ursa/rrfsv2x_det
   workflow_xml: rrfs.xml
   workflow_db: rrfs.db
