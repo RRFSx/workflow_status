@@ -3,7 +3,7 @@
 # Shared defaults under `common:` apply to all experiments and can be overridden per experiment.
 
 common:
-  # rescue_only: true  # set true to only run ens_fcst_rescue (skip status JSON, emails, and git push)
+  # rescue_only: true  # set true to only run ens_fcst_rescue
   default_exp: ursa/rrfsv2x_det
   workflow_xml: rrfs.xml
   workflow_db: rrfs.db
@@ -33,9 +33,9 @@ experiments:
     expdir: /scratch3/BMC/rtwrfruc/RRFSv2X/NCO_dirs/RRFSv2X/exp/rrfsdet
     subject_prefix: rrfsv2x_det
 
-  - name: rrfsv2x_ens
+  - name: rrfsv2x_enkf
     expdir: /scratch3/BMC/rtwrfruc/RRFSv2X/NCO_dirs/RRFSv2X/exp/rrfsenkf
-    subject_prefix: rrfsv2x_ens
+    subject_prefix: rrfsv2x_enkf
     checks:
       ens_fcst_rescue:
-        enabled: true
+        enabled: false
