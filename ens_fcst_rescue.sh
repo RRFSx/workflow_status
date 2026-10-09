@@ -5,7 +5,7 @@
 #   ${COMROOT}/${NET}/${rrfs_ver}/${RUN}.${PDY_prev}/${cyc_prev}/fcst/enkf/memXXX/mpasout.${timestr}.nc
 # to the current cycle's prep_ic directory:
 #   ${DATAROOT}/${PDY}/${RUN}_prep_ic_${cyc}_${rrfs_ver}/enkf/memXXX/mpasout.nc
-# and reboots the dead fcst_mXXX task via rocotoboot.
+# and rewinds the dead fcst_mXXX task via rocotorewind so rocotorun resubmits it cleanly.
 
 set -euo pipefail
 
@@ -13,6 +13,7 @@ unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU
 
 SRC_FILE="${SRC_FILE:?ERROR: SRC_FILE is required}"
 DST_FILE="${DST_FILE:?ERROR: DST_FILE is required}"
+FCST_DIR="${FCST_DIR:-}"
 EXPDIR="${EXPDIR:?ERROR: EXPDIR is required}"
 WORKFLOW_XML="${WORKFLOW_XML:-rrfs.xml}"
 WORKFLOW_DB="${WORKFLOW_DB:-rrfs.db}"
@@ -24,6 +25,7 @@ ROCOTO_MOD="${ROCOTO_MOD:-rocoto/1.3.7g}"
 echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Starting ensemble forecast rescue for ${TASK_NAME} at cycle ${CDATE}"
 echo "  SRC_FILE: ${SRC_FILE}"
 echo "  DST_FILE: ${DST_FILE}"
+echo "  FCST_DIR: ${FCST_DIR}"
 echo "  EXPDIR:   ${EXPDIR}"
 
 if [[ ! -s "${SRC_FILE}" ]]; then
@@ -46,7 +48,13 @@ cp -f "${SRC_FILE}" "${DST_FILE}"
 touch "${DST_DIR}/ens_fcst_rescue.done"
 echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Successfully copied mpasout.nc to ${DST_FILE}"
 
-# 2. Load Rocoto module for this machine
+# 2. Clean up leftover files in the member's forecast umbrella directory
+if [[ -n "${FCST_DIR}" && -d "${FCST_DIR}" ]]; then
+  rm -rf "${FCST_DIR:?}"/*
+  echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Cleaned leftover forecast files in ${FCST_DIR}"
+fi
+
+# 3. Load Rocoto module for this machine
 command -v module &>/dev/null || { [[ -f /etc/profile ]] && source /etc/profile 2>/dev/null || true; }
 
 case "${MACHINE}" in
@@ -79,8 +87,8 @@ if command -v module &>/dev/null; then
   module load "${ROCOTO_MOD}" 2>/dev/null || true
 fi
 
-# 3. Reboot the dead fcst_mXXX task
+# 4. Rewind the dead fcst_mXXX task so rocotorun resubmits it cleanly from the login node
 cd "${EXPDIR}"
-echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Running: rocotoboot -w ${WORKFLOW_XML} -d ${WORKFLOW_DB} -c ${CDATE} -t ${TASK_NAME}"
-rocotoboot -w "${WORKFLOW_XML}" -d "${WORKFLOW_DB}" -c "${CDATE}" -t "${TASK_NAME}"
+echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Running: rocotorewind -w ${WORKFLOW_XML} -d ${WORKFLOW_DB} -c ${CDATE} -t ${TASK_NAME}"
+rocotorewind -w "${WORKFLOW_XML}" -d "${WORKFLOW_DB}" -c "${CDATE}" -t "${TASK_NAME}"
 echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Rescue completed for ${TASK_NAME} (${CDATE})"

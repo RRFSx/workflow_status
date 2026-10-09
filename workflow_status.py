@@ -514,9 +514,11 @@ def check_ens_fcst_rescue(
 ) -> List[Dict[str, str]]:
     """
     Rescue dead ensemble forecast tasks (fcst_mXXX):
+    - Only check Active cycles.
     - Skip if more than `max_dead_fcst` (default 5) dead fcst_m* tasks in a cycle.
-    - Copy 1h forecast mpasout file from previous cycle to current cycle's prep_ic dir
-      and reboot the dead task via a Slurm job (spec from prep_ic task).
+    - Move bad mpasout.nc to bad.mpasout.nc, copy 1h forecast mpasout file from previous cycle
+      to current cycle's prep_ic dir, clean leftover forecast files, and rewind the dead task
+      via rocotorewind in a Slurm job (spec from prep_ic task).
     - Rescue each (cycle, fcst_mXXX) at most once (marked by ens_fcst_rescue.done in prep_ic member dir).
     """
     max_dead = int(rescue_cfg.get("max_dead_fcst", 5))
@@ -572,6 +574,7 @@ def check_ens_fcst_rescue(
         net = spec["NET"]
         run = spec["RUN"]
         rrfs_ver = spec["rrfs_ver"]
+        log_dir = Path(f"{comroot}/{net}/{rrfs_ver}/logs/{run}.{pdy}/{cyc}/enkf")
 
         for task_name in dead_ens_tasks:
             m = re.match(r"^fcst_m(\d+)$", task_name)
@@ -582,8 +585,10 @@ def check_ens_fcst_rescue(
                 f"{comroot}/{net}/{rrfs_ver}/{run}.{pdy_prev}/{cyc_prev}/fcst/enkf/mem{mem_id}/mpasout.{timestr}.nc"
             )
             dst_dir = Path(f"{dataroot}/{pdy}/{run}_prep_ic_{cyc}_{rrfs_ver}/enkf/mem{mem_id}")
+            fcst_dir = Path(f"{dataroot}/{pdy}/{run}_fcst_{cyc}_{rrfs_ver}/enkf/mem{mem_id}")
             dst_file = dst_dir / "mpasout.nc"
             done_marker = dst_dir / "ens_fcst_rescue.done"
+            rescue_log = log_dir / f"ens_fcst_rescue_{task_name}_{cdate[:10]}.log"
 
             if done_marker.is_file():
                 logging.info("Skipping %s (%s): already rescued once (%s exists)", task_name, cdate, done_marker)
@@ -603,7 +608,7 @@ def check_ens_fcst_rescue(
                 "--nodes=1",
                 "--ntasks=1",
                 f"--time={spec.get('walltime') or '00:10:00'}",
-                f"--output={dst_dir}/ens_fcst_rescue_{cdate[:10]}.log",
+                f"--output={rescue_log}",
             ]
             if mem_spec:
                 sbatch_cmd.append(f"--mem={mem_spec}")
@@ -617,34 +622,42 @@ def check_ens_fcst_rescue(
                 sbatch_cmd.extend(spec["native"].split())
 
             export_vars = (
-                f"ALL,SRC_FILE={src_file},DST_FILE={dst_file},EXPDIR={expdir},"
+                f"ALL,SRC_FILE={src_file},DST_FILE={dst_file},FCST_DIR={fcst_dir},EXPDIR={expdir},"
                 f"WORKFLOW_XML={xml},WORKFLOW_DB={db},CDATE={cdate},TASK_NAME={task_name},MACHINE={cluster}"
             )
             sbatch_cmd.extend([f"--export={export_vars}", str(rescue_script)])
 
             if dry_run:
                 logging.info("[DRY-RUN] Would submit rescue job: %s", " ".join(sbatch_cmd))
-                rescued.append({"cycle": cdate, "task": task_name, "jobid": "dry-run"})
-                continue
+                out_str = "dry-run"
+            else:
+                try:
+                    done_marker.touch()
+                except OSError as exc:
+                    logging.error(
+                        "Cannot write rescue marker %s (permission denied — ensure monitor runs as experiment owner): %s",
+                        done_marker,
+                        exc,
+                    )
+                    continue
 
-            try:
-                done_marker.touch()
-            except OSError as exc:
-                logging.error(
-                    "Cannot write rescue marker %s (permission denied — ensure monitor runs as experiment owner): %s",
-                    done_marker,
-                    exc,
-                )
-                continue
-
-            proc = subprocess.run(sbatch_cmd, cwd=str(expdir), capture_output=True, text=True, timeout=30)
-            if proc.returncode == 0:
+                proc = subprocess.run(sbatch_cmd, cwd=str(expdir), capture_output=True, text=True, timeout=30)
+                if proc.returncode != 0:
+                    done_marker.unlink(missing_ok=True)
+                    logging.error("sbatch failed for %s (%s): %s", task_name, cdate, proc.stderr.strip())
+                    continue
                 out_str = proc.stdout.strip()
                 logging.info("Submitted rescue job for %s (%s): %s", task_name, cdate, out_str)
-                rescued.append({"cycle": cdate, "task": task_name, "jobid": out_str})
-            else:
-                done_marker.unlink(missing_ok=True)
-                logging.error("sbatch failed for %s (%s): %s", task_name, cdate, proc.stderr.strip())
+
+            rescued.append(
+                {
+                    "cycle": cdate,
+                    "task": task_name,
+                    "jobid": out_str,
+                    "log": str(rescue_log),
+                    "bad_mpasout": str(dst_dir / "bad.mpasout.nc"),
+                }
+            )
 
     return rescued
 
@@ -817,13 +830,18 @@ def process_experiment(
         rescued = check_ens_fcst_rescue(status, expdir, rescue_cfg, xml, db, cluster, dry_run)
         if rescued:
             lines = [
-                f"Ensemble forecast task(s) dead but rescued in {exp_name} on {cluster}",
+                f"Ensemble forecast task(s) dead — rescue job(s) submitted in {exp_name} on {cluster}",
                 f"Time: {status['updated_at']}",
+                "Action: Move bad mpasout.nc to bad.mpasout.nc, copy previous 1h forecast mpasout.nc, clean leftover fcst files, and rewind task via rocotorewind.",
                 "",
             ]
             for r in rescued:
-                lines.append(f"  {r['cycle']} {r['task']} dead but rescued ({r['jobid']})")
-            send_email(f"{subject_prefix}: dead fcst rescued", "\n".join(lines), recipients, dry_run)
+                lines.append(
+                    f"  {r['cycle']} {r['task']} — rescue job ({r['jobid']})\n"
+                    f"    Log: {r['log']}\n"
+                    f"    Saved bad IC: {r['bad_mpasout']}"
+                )
+            send_email(f"{subject_prefix}: dead fcst rescue submitted", "\n".join(lines), recipients, dry_run)
         if rescue_only:
             s = status["summary"]
             logging.info(
