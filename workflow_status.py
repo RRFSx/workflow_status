@@ -530,6 +530,8 @@ def check_ens_fcst_rescue(
     rescued: List[Dict[str, str]] = []
 
     for c in status.get("cycles", []):
+        if c.get("cycle_state") != "Active":
+            continue
         cdate = c.get("cdate", "")
         if len(cdate) < 10:
             continue

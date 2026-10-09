@@ -37,10 +37,12 @@ if [[ ! -d "${DST_DIR}" ]]; then
   exit 1
 fi
 
-# 1. Copy 1h forecast mpasout file to prep_ic directory
-TMP_DST="${DST_FILE}.rescue_tmp.$$"
-cp -f "${SRC_FILE}" "${TMP_DST}"
-mv -f "${TMP_DST}" "${DST_FILE}"
+# 1. Move previous mpasout.nc under prep_ic to bad.mpasout.nc for debugging, then copy 1h forecast mpasout file
+if [[ -e "${DST_FILE}" || -L "${DST_FILE}" ]]; then
+  mv -f "${DST_FILE}" "${DST_DIR}/bad.mpasout.nc"
+  echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Moved previous ${DST_FILE} to ${DST_DIR}/bad.mpasout.nc"
+fi
+cp -f "${SRC_FILE}" "${DST_FILE}"
 touch "${DST_DIR}/ens_fcst_rescue.done"
 echo "[$(date -u '+%Y-%m-%d %H:%M:%S UTC')] Successfully copied mpasout.nc to ${DST_FILE}"
 
