@@ -22,6 +22,10 @@ common:
         - name: fcst
           log_pattern: "{workdir}/fcst_{cyc}/log.atmosphere.0000.out"
           max_idle_sec: 1200
+    ens_fcst_rescue:
+      enabled: false
+      max_dead_fcst: 5
+      mem: 64G
 
 experiments:
   - name: rrfsv2x_det
@@ -31,3 +35,6 @@ experiments:
   - name: rrfsv2x_ens
     expdir: /scratch3/BMC/rtwrfruc/RRFSv2X/NCO_dirs/RRFSv2X/exp/rrfsenkf
     subject_prefix: rrfsv2x_ens
+    checks:
+      ens_fcst_rescue:
+        enabled: true

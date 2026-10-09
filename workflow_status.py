@@ -461,6 +461,192 @@ def check_hung_jobs(
     return hung_found
 
 
+def parse_prep_ic_spec(expdir: Path, xml: str) -> Dict[str, str]:
+    """Parse XML entities and <task name="prep_ic"> job specification from workflow XML."""
+    xml_path = expdir / xml
+    if not xml_path.is_file():
+        return {}
+
+    text = xml_path.read_text(errors="ignore")
+    entities: Dict[str, str] = {}
+    for m in re.finditer(r'<!ENTITY\s+(\S+)\s+"([^"]*)"\s*>', text):
+        entities[m.group(1)] = m.group(2).strip()
+
+    def resolve_entities(val: str) -> str:
+        out = val
+        for _ in range(3):
+            out = re.sub(r"&([A-Za-z0-9_]+);", lambda match: entities.get(match.group(1), match.group(0)), out)
+        return out.strip()
+
+    for k in list(entities.keys()):
+        entities[k] = resolve_entities(entities[k])
+
+    task_match = re.search(r'<task\s+name="prep_ic"[^>]*>(.*?)</task>', text, re.DOTALL)
+    task_body = task_match.group(1) if task_match else ""
+
+    def extract_tag(tag: str, default: str = "") -> str:
+        m = re.search(rf"<{tag}>(.*?)</{tag}>", task_body, re.DOTALL)
+        return resolve_entities(m.group(1)) if m else default
+
+    return {
+        "account": extract_tag("account", entities.get("ACCOUNT", "")),
+        "queue": extract_tag("queue", entities.get("QUEUE_DEFAULT", "")),
+        "partition": extract_tag("partition", entities.get("PARTITION", "")),
+        "walltime": extract_tag("walltime", "00:10:00"),
+        "native": extract_tag("native", ""),
+        "COMROOT": entities.get("COMROOT", ""),
+        "DATAROOT": entities.get("DATAROOT", ""),
+        "NET": entities.get("NET", "rrfs"),
+        "RUN": entities.get("RUN", "rrfs"),
+        "rrfs_ver": entities.get("rrfs_ver", "v2.1.4"),
+        "WGF": entities.get("WGF", "enkf"),
+    }
+
+
+def check_ens_fcst_rescue(
+    status: Dict[str, Any],
+    expdir: Path,
+    rescue_cfg: Dict[str, Any],
+    xml: str,
+    db: str,
+    cluster: str,
+    dry_run: bool,
+) -> List[Dict[str, str]]:
+    """
+    Rescue dead ensemble forecast tasks (fcst_mXXX):
+    - Skip if more than `max_dead_fcst` (default 5) dead fcst_m* tasks in a cycle.
+    - Copy 1h forecast mpasout file from previous cycle to current cycle's prep_ic dir
+      and reboot the dead task via a Slurm job (spec from prep_ic task).
+    - Rescue each (cycle, fcst_mXXX) at most once (marked by ens_fcst_rescue.done in prep_ic member dir).
+    """
+    max_dead = int(rescue_cfg.get("max_dead_fcst", 5))
+    mem_spec = str(rescue_cfg.get("mem", "64G")).strip()
+    rescue_script = REPO_ROOT / "ens_fcst_rescue.sh"
+    if not rescue_script.is_file():
+        logging.error("Rescue script not found: %s", rescue_script)
+        return []
+
+    spec: Optional[Dict[str, str]] = None
+    rescued: List[Dict[str, str]] = []
+
+    for c in status.get("cycles", []):
+        cdate = c.get("cdate", "")
+        if len(cdate) < 10:
+            continue
+        dead_ens_tasks = [
+            t.get("name", "")
+            for t in c.get("tasks", [])
+            if (t.get("state") or "").upper() in ("DEAD", "FAILED")
+            and re.match(r"^fcst_m(\d+)$", t.get("name", ""))
+        ]
+        if not dead_ens_tasks:
+            continue
+
+        if len(dead_ens_tasks) > max_dead:
+            logging.warning(
+                "Cycle %s has %d dead fcst_m* tasks (> %d) — taking no rescue action",
+                cdate,
+                len(dead_ens_tasks),
+                max_dead,
+            )
+            continue
+
+        if spec is None:
+            spec = parse_prep_ic_spec(expdir, xml)
+            if not spec.get("COMROOT") or not spec.get("DATAROOT"):
+                logging.error("Could not parse COMROOT/DATAROOT from %s/%s for rescue", expdir, xml)
+                return []
+
+        cdate_dt = dt.datetime.strptime(cdate[:10], "%Y%m%d%H")
+        prev_dt = cdate_dt - dt.timedelta(hours=1)
+        pdy = cdate[:8]
+        cyc = cdate[8:10]
+        pdy_prev = prev_dt.strftime("%Y%m%d")
+        cyc_prev = prev_dt.strftime("%H")
+        timestr = cdate_dt.strftime("%Y-%m-%d_%H.00.00")
+
+        comroot = spec["COMROOT"]
+        dataroot = spec["DATAROOT"]
+        net = spec["NET"]
+        run = spec["RUN"]
+        rrfs_ver = spec["rrfs_ver"]
+
+        for task_name in dead_ens_tasks:
+            m = re.match(r"^fcst_m(\d+)$", task_name)
+            if not m:
+                continue
+            mem_id = m.group(1)
+            src_file = Path(
+                f"{comroot}/{net}/{rrfs_ver}/{run}.{pdy_prev}/{cyc_prev}/fcst/enkf/mem{mem_id}/mpasout.{timestr}.nc"
+            )
+            dst_dir = Path(f"{dataroot}/{pdy}/{run}_prep_ic_{cyc}_{rrfs_ver}/enkf/mem{mem_id}")
+            dst_file = dst_dir / "mpasout.nc"
+            done_marker = dst_dir / "ens_fcst_rescue.done"
+
+            if done_marker.is_file():
+                logging.info("Skipping %s (%s): already rescued once (%s exists)", task_name, cdate, done_marker)
+                continue
+
+            if not src_file.is_file() or src_file.stat().st_size == 0:
+                logging.warning("Skipping rescue for %s (%s): 1h forecast file not found: %s", task_name, cdate, src_file)
+                continue
+
+            if not dst_dir.is_dir():
+                logging.warning("Skipping rescue for %s (%s): prep_ic dir not found: %s", task_name, cdate, dst_dir)
+                continue
+
+            sbatch_cmd = [
+                "sbatch",
+                f"--job-name=rescue_{task_name}_{cdate[:10]}",
+                "--nodes=1",
+                "--ntasks=1",
+                f"--time={spec.get('walltime') or '00:10:00'}",
+                f"--output={dst_dir}/ens_fcst_rescue_{cdate[:10]}.log",
+            ]
+            if mem_spec:
+                sbatch_cmd.append(f"--mem={mem_spec}")
+            if spec.get("account"):
+                sbatch_cmd.append(f"--account={spec['account']}")
+            if spec.get("queue"):
+                sbatch_cmd.append(f"--qos={spec['queue']}")
+            if spec.get("partition"):
+                sbatch_cmd.append(f"--partition={spec['partition']}")
+            if spec.get("native"):
+                sbatch_cmd.extend(spec["native"].split())
+
+            export_vars = (
+                f"ALL,SRC_FILE={src_file},DST_FILE={dst_file},EXPDIR={expdir},"
+                f"WORKFLOW_XML={xml},WORKFLOW_DB={db},CDATE={cdate},TASK_NAME={task_name},MACHINE={cluster}"
+            )
+            sbatch_cmd.extend([f"--export={export_vars}", str(rescue_script)])
+
+            if dry_run:
+                logging.info("[DRY-RUN] Would submit rescue job: %s", " ".join(sbatch_cmd))
+                rescued.append({"cycle": cdate, "task": task_name, "jobid": "dry-run"})
+                continue
+
+            try:
+                done_marker.touch()
+            except OSError as exc:
+                logging.error(
+                    "Cannot write rescue marker %s (permission denied — ensure monitor runs as experiment owner): %s",
+                    done_marker,
+                    exc,
+                )
+                continue
+
+            proc = subprocess.run(sbatch_cmd, cwd=str(expdir), capture_output=True, text=True, timeout=30)
+            if proc.returncode == 0:
+                out_str = proc.stdout.strip()
+                logging.info("Submitted rescue job for %s (%s): %s", task_name, cdate, out_str)
+                rescued.append({"cycle": cdate, "task": task_name, "jobid": out_str})
+            else:
+                done_marker.unlink(missing_ok=True)
+                logging.error("sbatch failed for %s (%s): %s", task_name, cdate, proc.stderr.strip())
+
+    return rescued
+
+
 def write_status_json(status: Dict[str, Any], status_file: Path) -> None:
     """Atomically write `.state/<exp>.json` to disk."""
     status_file.parent.mkdir(parents=True, exist_ok=True)
@@ -613,6 +799,7 @@ def process_experiment(
     dead_cfg = checks_cfg.get("dead_jobs", {})
     stall_cfg = checks_cfg.get("stall", {})
     hung_cfg = checks_cfg.get("hung_jobs", {})
+    rescue_cfg = checks_cfg.get("ens_fcst_rescue", {})
 
     status_file = state_dir / f"{exp_name}.json"
     state_file = state_dir / f"{exp_name}_{cluster}_state.json"
@@ -646,7 +833,11 @@ def process_experiment(
                 )
             send_email(f"{subject_prefix}: dead job(s)", "\n".join(lines), recipients, dry_run)
 
-    # 3. Stall check
+    # 3. Ensemble fcst rescue check (<= 5 dead fcst_m* tasks, rescue once per cycle/member)
+    if rescue_cfg.get("enabled", False):
+        check_ens_fcst_rescue(status, expdir, rescue_cfg, xml, db, cluster, dry_run)
+
+    # 4. Stall check
     if stall_cfg.get("enabled", True):
         threshold_sec = int(stall_cfg.get("threshold_sec", 3600))
         new_stall, stall_dur = check_stall(status, state, threshold_sec)
@@ -661,7 +852,7 @@ def process_experiment(
             )
             send_email(f"{subject_prefix}: workflow stalled", body, recipients, dry_run)
 
-    # 4. Hung job check
+    # 5. Hung job check
     if hung_cfg.get("enabled", False):
         hung_list = check_hung_jobs(status, expdir, hung_cfg, xml, db, dry_run)
         if hung_list:
